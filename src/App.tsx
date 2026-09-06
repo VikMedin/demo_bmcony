@@ -149,7 +149,19 @@ export default function App() {
   
   // Role switcher state (Simulation only - keep local)
   const { firebaseUser, profile, setProfile, loading: authLoading } = useFirebaseAuth();
-  const userRole = profile?.role || 'publico';
+  const [demoRole, setDemoRole] = useState<'superadmin' | 'admin' | 'mensajero' | null>(null);
+  
+  const activeProfile = demoRole ? {
+    id: 'demo-user',
+    email: 'demo@demo.com',
+    name: `Usuario Demo (${demoRole === 'superadmin' ? 'Dueño' : demoRole === 'admin' ? 'Caja/Comedor' : 'Repartidor'})`,
+    phone: '',
+    role: demoRole,
+    avatar: 'https://ui-avatars.com/api/?name=Demo&background=f59e0b&color=fff',
+    createdAt: new Date().toISOString()
+  } as any : profile;
+
+  const userRole = activeProfile?.role || 'publico';
   const [adminTab, setAdminTab] = useState<'dashboard' | 'kitchen' | 'caja' | 'clientes' | 'repartidor' | 'config' | 'perfil' | 'menu'>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [newPassword, setNewPassword] = useState('');
@@ -350,6 +362,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    setDemoRole(null);
     await signOut(auth);
     addAuditLog(`Cerró sesión administrativa.`);
     setIsLoggingIn(false);
@@ -368,12 +381,12 @@ export default function App() {
   }, [userRole]);
 
   useEffect(() => {
-    if (profile?.fontSizePreference === 'large') {
+    if (activeProfile?.fontSizePreference === 'large') {
       document.documentElement.classList.add('font-size-large');
     } else {
       document.documentElement.classList.remove('font-size-large');
     }
-  }, [profile?.fontSizePreference]);
+  }, [activeProfile?.fontSizePreference]);
 
   // Modals / Helpers for edit plate inside settings
   const [editingDish, setEditingDish] = useState<FoodItem | null>(null);
@@ -562,7 +575,7 @@ export default function App() {
                 id="header-user-avatar"
               >
                 <img 
-                  src={profile?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150'} 
+                  src={activeProfile?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150'} 
                   alt={`Avatar ${userRole}`} 
                   className="h-full w-full object-cover" 
                 />
@@ -589,7 +602,7 @@ export default function App() {
               <div className="flex items-center gap-2.5">
                 <div className="text-right hidden sm:block space-y-0.5">
                   <span className="block text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">
-                    {profile?.name || userProfiles[userRole as 'superadmin' | 'admin' | 'mensajero']?.name || 'Personal Cony'}
+                    {activeProfile?.name || userProfiles[userRole as 'superadmin' | 'admin' | 'mensajero']?.name || 'Personal Cony'}
                   </span>
                   <span className="inline-block text-[10px] font-bold text-gray-600 capitalize bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
                     {userRole === 'superadmin' ? '👑 Super Admin' : userRole === 'admin' ? '🍳 Administrativo' : userRole === 'mensajero' ? '🛵 Mensajero' : '⏳ Pendiente'}
@@ -636,13 +649,18 @@ export default function App() {
       <main className="flex-1 w-full flex flex-col">
         {userRole === 'publico' ? (
           isLoggingIn ? (
-            // RESTRICTED ACCESS LOGIN SCREEN (Required user/password before access)
-            <div className="py-12 bg-amber-50/20 flex-1 flex items-center justify-center">
-              <AdminLogin 
-                onLoginSuccess={handleLoginSuccess} 
-                triggerToast={triggerToast}
-                onCancel={() => setIsLoggingIn(false)}
-              />
+            // DEMO LOGIN SCREEN (TEMPORARY FOR PRESENTATION)
+            <div className="py-12 bg-amber-50/20 flex-1 flex items-center justify-center p-4">
+              <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full border border-amber-200">
+                <h2 className="text-2xl font-serif font-bold text-amber-950 mb-2 text-center">Modo Demo Activado</h2>
+                <p className="text-gray-500 text-sm text-center mb-6">Selecciona un rol para probar la aplicación rápida sin registrarte.</p>
+                <div className="space-y-3">
+                  <button onClick={() => { setDemoRole('superadmin'); setIsLoggingIn(false); }} className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-colors">Ingresar como Administrador (Dueño)</button>
+                  <button onClick={() => { setDemoRole('admin'); setIsLoggingIn(false); }} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold transition-colors">Ingresar como Cajero/Comedor</button>
+                  <button onClick={() => { setDemoRole('mensajero'); setIsLoggingIn(false); }} className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold transition-colors">Ingresar como Repartidor</button>
+                </div>
+                <button onClick={() => setIsLoggingIn(false)} className="w-full mt-6 py-2 text-gray-500 hover:bg-gray-50 rounded-xl font-bold text-sm border border-gray-200 transition-colors">Volver a la Carta Pública</button>
+              </div>
             </div>
           ) : (
             // PUBLIC DINER MENU
@@ -1701,7 +1719,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'perfil' && profile && (
+                {adminTab === 'perfil' && activeProfile && (
                   <div className="animate-fade-in max-w-2xl mx-auto space-y-6">
                     <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
                       <h2 className="font-serif font-bold text-lg text-amber-950 flex items-center gap-2">
@@ -1713,9 +1731,9 @@ export default function App() {
                       {/* AVATAR PREVIEW BLOCK */}
                       <div className="mt-6 flex flex-col sm:flex-row items-center gap-6 pb-6 border-b border-gray-150">
                         <div className="h-24 w-24 rounded-full overflow-hidden border-4 border-amber-100 shadow-md shrink-0 bg-amber-50 flex items-center justify-center">
-                          {profile.avatar ? (
+                          {activeProfile.avatar ? (
                             <img 
-                              src={profile.avatar} 
+                              src={activeProfile.avatar} 
                               alt="Tu Avatar" 
                               className="h-full w-full object-cover" 
                             />
@@ -1725,7 +1743,7 @@ export default function App() {
                         </div>
                         <div className="text-center sm:text-left space-y-1">
                           <h3 className="font-serif font-bold text-base text-amber-950">
-                            {profile.name || 'Nombre no configurado'}
+                            {activeProfile.name || 'Nombre no configurado'}
                           </h3>
                           <p className="text-xs font-semibold text-amber-600 capitalize">
                             Rol del Sistema: {userRole}
@@ -1747,7 +1765,7 @@ export default function App() {
                           
                           if (updatedName && firebaseUser) {
                             const newProf = { 
-                              ...profile, 
+                              ...activeProfile, 
                               name: updatedName, 
                               phone: updatedPhone, 
                               avatar: updatedAvatar,
@@ -1784,7 +1802,7 @@ export default function App() {
                             <input
                               type="text"
                               name="fullName"
-                              defaultValue={profile.name}
+                              defaultValue={activeProfile.name}
                               placeholder="Ej. Doña Cony Especial"
                               className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                               required
@@ -1797,7 +1815,7 @@ export default function App() {
                             <input
                               type="text"
                               name="phone"
-                              defaultValue={profile.phone}
+                              defaultValue={activeProfile.phone}
                               placeholder="Ej. 5512345678"
                               className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             />
@@ -1809,7 +1827,7 @@ export default function App() {
                             <input
                               type="email"
                               name="email"
-                              defaultValue={profile.email}
+                              defaultValue={activeProfile.email}
                               disabled
                               className="w-full p-2.5 border border-gray-200 rounded-xl text-xs bg-gray-50 text-gray-500 cursor-not-allowed"
                             />
@@ -1820,7 +1838,7 @@ export default function App() {
                             <label className="block text-xs font-bold text-gray-600 mb-1">Tamaño de Letra (a — A)</label>
                             <select
                               name="fontSizePreference"
-                              defaultValue={profile.fontSizePreference || 'normal'}
+                              defaultValue={activeProfile.fontSizePreference || 'normal'}
                               className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             >
                               <option value="normal">Normal (Predeterminado)</option>
@@ -1855,7 +1873,7 @@ export default function App() {
                               if (file) {
                                 try {
                                   const base64String = await resizeImage(file, 200, 200);
-                                  const newProf = { ...profile, avatar: base64String };
+                                  const newProf = { ...activeProfile, avatar: base64String };
                                   const { doc, setDoc } = await import('firebase/firestore');
                                   const { db } = await import('./firebase');
                                   await setDoc(doc(db, 'cony_staff_users', firebaseUser.uid), newProf);
@@ -1877,8 +1895,8 @@ export default function App() {
                             type="url"
                             name="avatarUrl"
                             id="avatarUrlField"
-                            key={profile.avatar}
-                            defaultValue={profile.avatar}
+                            key={activeProfile.avatar}
+                            defaultValue={activeProfile.avatar}
                             placeholder="Ej. https://images.unsplash.com/..."
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                           />

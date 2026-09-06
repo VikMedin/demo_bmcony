@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // Helper Functions
+    function isSignedIn() { return request.auth != null; }
+    
+    function getUserRole() {
+      let staffDoc = get(/databases/$(database)/documents/cony_staff_users/$(request.auth.uid));
+      return staffDoc != null ? staffDoc.data.role : 'esperando';
+    }
+    
+    function isSuperAdmin() { 
+      return isSignedIn() && (getUserRole() == 'superadmin' || request.auth.token.email == 'vmedin@gmail.com'); 
+    }
+    function isAdmin() { 
+      return isSignedIn() && (getUserRole() == 'admin' || isSuperAdmin()); 
+    }
+    function isStaff() { 
+      return isSignedIn() && (isAdmin() || getUserRole() == 'mensajero'); 
+    }
+
+    // Public configurations
+    match /settings/cony_business_config {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+    
+    match /settings/cony_user_profiles_v3 {
+      allow read: if true;
+      allow write: if false; // Deprecated
+    }
+
+    // Food items
+    match /cony_food_items/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Orders
+    match /cony_orders/{orderId} {
+      allow create: if true; // Public can create orders
+      allow read, update, delete: if isStaff();
+    }
+
+    // Expenses
+    match /cony_expenses/{expenseId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Resto Clients (CRM)
+    match /cony_resto_clients/{clientId} {
+      allow create: if true;
+      allow read, update, delete: if isStaff();
+    }
+
+    // Staff Users
+    match /cony_staff_users/{userId} {
+      // Anyone authenticated can create their own profile when they register
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      // All authenticated staff and members can read profiles
+      allow read: if isSignedIn();
+      // Users can update their own profile (name, avatar, phone), but only superadmin can update roles
+      allow update: if isSuperAdmin() || (request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      // Only superadmin can delete profiles
+      allow delete: if isSuperAdmin();
+    }
+
+    // Audit Logs
+    match /cony_audit_logs/{logId} {
+      allow create: if isStaff();
+      allow read, update, delete: if isSuperAdmin();
+    }
+  }
+}

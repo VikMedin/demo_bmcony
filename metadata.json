@@ -1,0 +1,6 @@
+{
+  "name": "Desayunos Cony",
+  "description": "Plataforma de menú digital, pedidos por WhatsApp, comanda digital, caja, gastos y reparto para cocinas locales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,1 @@
+sed -i "s/import { useLocalStorage } from '.\/hooks\/useLocalStorage';/import { useFirebaseAuth } from '.\/hooks\/useFirebaseAuth';\nimport { signOut, updatePassword } from 'firebase\/auth';\nimport { auth } from '.\/firebase';/" src/App.tsx

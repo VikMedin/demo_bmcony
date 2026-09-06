@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+html.font-size-large {
+  font-size: 120%; /* Makes all rem units 20% larger for better accessibility */
+}

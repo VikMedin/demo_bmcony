@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { ShoppingBag, Plus, Minus, X, Check, Clock, AlertTriangle, MessageSquare, ExternalLink, CheckCircle, Coffee, MapPin, Heart, Tag } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ShoppingBag, Plus, Minus, X, Check, Clock, AlertTriangle, MessageSquare, ExternalLink, CheckCircle, Coffee, MapPin, Heart, Tag, Sparkles } from 'lucide-react';
 import { FoodItem, FoodOrder, BusinessConfig, Coupon } from '../types';
 
 const DEFAULT_BEVERAGE_IMAGE = 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&q=80&w=800';
@@ -195,7 +195,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
       return;
     }
     if (item.stock <= 0) {
-      triggerToast('error', 'Platillo Agotado', 'Lo sentimos, ya no quedan porciones disponibles.');
+      triggerToast('error', 'Platillo Agotado', 'Lo sentimos, este platillo se encuentra agotado por hoy.');
       return;
     }
     setSelectedFood(item);
@@ -283,11 +283,21 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
     // Trigger cross-selling logic
     // Suggest a sweet beverage or side that isn't currently in the cart
-    const coffee = foodItems.find(f => f.id === 'f4'); // Café de olla
-    const shake = foodItems.find(f => f.id === 'f5'); // Licuado
+    const coffee = foodItems.find(f => 
+      !cart.some(c => c.item.id === f.id) && 
+      f.id !== selectedFood.id && 
+      (f.category === 'Bebidas' || f.name.toLowerCase().includes('café') || f.name.toLowerCase().includes('cafe')) &&
+      (f.stock === undefined || f.stock > 0)
+    );
+    const shake = foodItems.find(f => 
+      !cart.some(c => c.item.id === f.id) && 
+      f.id !== selectedFood.id && 
+      (f.name.toLowerCase().includes('licuado') || f.category === 'Bebidas') &&
+      (f.stock === undefined || f.stock > 0)
+    );
     const suggested = coffee || shake;
     
-    if (suggested && !cart.some(c => c.item.id === suggested.id) && Math.random() > 0.3) {
+    if (suggested && !cart.some(c => c.item.id === suggested.id) && Math.random() > 0.4) {
       setCrossSellItem(suggested);
       setShowCrossSell(true);
     }
@@ -295,13 +305,24 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
   const handleAddCrossSell = () => {
     if (!crossSellItem) return;
+    const initialOps: { [key: string]: string[] } = {};
+    if (crossSellItem.options) {
+      crossSellItem.options.forEach(op => {
+        if (!op.multiselect && op.choices.length > 0) {
+          initialOps[op.title] = [op.choices[0]];
+        } else {
+          initialOps[op.title] = [];
+        }
+      });
+    }
+
     const cartId = `${crossSellItem.id}-${Date.now()}`;
     setCart(prev => [
       ...prev,
       {
         item: crossSellItem,
         quantity: 1,
-        selectedOptions: {},
+        selectedOptions: initialOps,
         selectedExtras: [],
         id: cartId
       }
@@ -309,6 +330,64 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
     setShowCrossSell(false);
     setCrossSellItem(null);
     triggerToast('success', 'Sugerencia Agregada', 'Se ha sumado a tu carrito, ¡excelente elección! 🤤');
+  };
+
+  // Sugerencias de compra para la ventana de pasar a pago / revisión
+  const checkoutSuggestions = useMemo(() => {
+    // Excluir platillos que ya están en el carrito o que estén agotados
+    const available = foodItems.filter(f => 
+      !cart.some(c => c.item.id === f.id) && (f.stock === undefined || f.stock > 0)
+    );
+
+    // Priorizar Bebidas y Postres/Para Endulzar el Día
+    const drinks = available.filter(f => 
+      f.category === 'Bebidas' || 
+      f.name.toLowerCase().includes('café') || 
+      f.name.toLowerCase().includes('cafe') || 
+      f.name.toLowerCase().includes('licuado') ||
+      f.name.toLowerCase().includes('chocolate') ||
+      f.name.toLowerCase().includes('refresco')
+    );
+    const sweets = available.filter(f => 
+      f.category === 'Para Endulzar el Día' || 
+      f.category.toLowerCase().includes('postre') ||
+      f.category.toLowerCase().includes('dulce')
+    );
+    const others = available.filter(f => !drinks.includes(f) && !sweets.includes(f));
+
+    // Combinar con variedad (primero bebidas, luego postres, luego otros)
+    const combined = [...drinks, ...sweets, ...others];
+    return combined.slice(0, 3);
+  }, [foodItems, cart]);
+
+  // Agregar sugerencia rápidamente desde la ventana de pago
+  const handleQuickAddSuggestion = (item: FoodItem) => {
+    const initialOps: { [key: string]: string[] } = {};
+    if (item.options) {
+      item.options.forEach(op => {
+        if (!op.multiselect && op.choices.length > 0) {
+          initialOps[op.title] = [op.choices[0]];
+        } else {
+          initialOps[op.title] = [];
+        }
+      });
+    }
+
+    const cartId = `${item.id}-${Date.now()}`;
+    const newCartItem = {
+      item,
+      quantity: 1,
+      selectedOptions: initialOps,
+      selectedExtras: [],
+      id: cartId
+    };
+
+    setCart(prev => [...prev, newCartItem]);
+    triggerToast(
+      'success',
+      'Sugerencia Agregada',
+      `Se ha sumado ${item.name} a tu pedido. ¡Excelente complemento!`
+    );
   };
 
   const updateCartQty = (id: string, delta: number) => {
@@ -580,13 +659,6 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                       </span>
                     </div>
                   )}
-                  {!isAgotado && item.stock <= 5 && (
-                    <div className="absolute top-3 right-3">
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-white text-[10px] font-bold uppercase">
-                        ¡Solo {item.stock} piezas!
-                      </span>
-                    </div>
-                  )}
                   <div className="absolute bottom-3 left-3 bg-white/95 px-2.5 py-1 rounded-lg shadow-xs text-xs font-bold text-amber-950">
                     {item.category}
                   </div>
@@ -597,15 +669,11 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                   <span className="inline-block px-2.5 py-1 rounded-lg bg-amber-50 text-amber-900 text-xs font-bold border border-amber-200/60">
                     {item.category}
                   </span>
-                  {isAgotado ? (
+                  {isAgotado && (
                     <span className="px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold uppercase">
                       Agotado por hoy
                     </span>
-                  ) : item.stock <= 5 ? (
-                    <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">
-                      ¡Solo {item.stock} piezas!
-                    </span>
-                  ) : null}
+                  )}
                 </div>
               )}
 
@@ -649,7 +717,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
       {/* Modifiers Modal */}
       {selectedFood && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div
             className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col animate-scale-up"
             style={{ maxWidth: '520px' }}
@@ -668,7 +736,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                 </p>
 
                 <div className="flex items-center gap-4 w-full">
-                  {/* Button 1: Pasar a Pago */}
+                  {/* Button 1: Pasar a Pago / Volver al Pedido */}
                   <button
                     onClick={() => {
                       setShowCheckout(true);
@@ -678,7 +746,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                     className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-transform active:scale-[0.98] shadow-md flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <ShoppingBag className="w-4 h-4" />
-                    Pasar a Pago
+                    {showCheckout ? 'Volver al Pedido y Pagar' : 'Pasar a Pago'}
                   </button>
 
                   {/* Button 2: 1:1 square button with a plus sign and notification globe */}
@@ -801,13 +869,10 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                     </div>
                   )}
 
-                  {/* Selector de Porciones Disponibles */}
+                  {/* Selector de Porciones */}
                   <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-3.5 space-y-1.5">
-                    <label className="block text-xs font-semibold text-gray-700 flex items-center justify-between">
-                      <span className="font-bold text-amber-950">Porciones a Seleccionar *</span>
-                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                        {selectedFood.stock > 0 ? `${selectedFood.stock} disponibles en comal` : 'Porciones abiertas'}
-                      </span>
+                    <label className="block text-xs font-bold text-amber-950">
+                      Porciones a Seleccionar *
                     </label>
                     <input
                       type="number"
@@ -1139,6 +1204,96 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* Sugerencias de Compra en Ventana de Pasar a Pago / Revisión */}
+                {cart.length > 0 && checkoutSuggestions.length > 0 && (
+                  <div className="p-4 bg-gradient-to-br from-amber-50/90 via-orange-50/50 to-amber-100/40 rounded-2xl border border-amber-200/90 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-amber-500 text-white flex items-center justify-center text-xs font-bold shadow-xs shrink-0">
+                        <Sparkles className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs text-amber-950 uppercase tracking-wider">
+                          Sugerencias de Compra
+                        </h4>
+                        <p className="text-[10px] text-amber-800/80">
+                          ¿Se te antoja complementar tu pedido con una rica bebida o antojito?
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {checkoutSuggestions.map(sugg => {
+                        const hasImage = Boolean(sugg.image && sugg.image.trim() !== '');
+                        const hasOptions = Boolean(sugg.options && sugg.options.length > 0);
+
+                        return (
+                          <div
+                            key={sugg.id}
+                            className="bg-white p-2.5 rounded-xl border border-amber-200/70 hover:border-amber-400 flex items-center justify-between gap-3 shadow-2xs transition-all"
+                          >
+                            <div
+                              className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
+                              onClick={() => {
+                                if (hasOptions) {
+                                  openModifiers(sugg);
+                                } else {
+                                  handleQuickAddSuggestion(sugg);
+                                }
+                              }}
+                            >
+                              <img
+                                src={hasImage ? sugg.image : DEFAULT_BEVERAGE_IMAGE}
+                                alt={sugg.name}
+                                className="w-12 h-12 rounded-lg object-cover bg-amber-50 shrink-0 border border-amber-100"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = DEFAULT_BEVERAGE_IMAGE;
+                                }}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h5 className="font-bold text-xs text-gray-900 truncate hover:text-amber-900 transition-colors">
+                                    {sugg.name}
+                                  </h5>
+                                  <span className="text-[9px] font-semibold text-amber-800 bg-amber-100 px-1.5 py-0.2 rounded-md">
+                                    {sugg.category}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 line-clamp-1">
+                                  {sugg.description || 'Delicioso acompañamiento casero tradicional.'}
+                                </p>
+                                <p className="text-xs font-bold text-emerald-700 mt-0.5">
+                                  +${sugg.price.toFixed(2)} MXN
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {hasOptions && (
+                                <button
+                                  type="button"
+                                  onClick={() => openModifiers(sugg)}
+                                  className="px-2 py-1.5 text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-lg transition-colors cursor-pointer"
+                                  title="Personalizar opciones"
+                                >
+                                  Opciones
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleQuickAddSuggestion(sugg)}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg transition-all active:scale-95 shadow-xs flex items-center gap-1 cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Agregar</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Checkout Form */}
                 {cart.length > 0 && (

@@ -8,7 +8,7 @@ export interface UserProfile {
   email: string;
   name: string;
   phone: string;
-  role: 'superadmin' | 'admin' | 'cocina' | 'repartidor' | 'mensajero' | 'esperando';
+  role: 'superadmin' | 'admin' | 'cocina' | 'mensajero' | 'esperando';
   avatar: string;
   fontSizePreference?: 'normal' | 'large';
   createdAt: string;

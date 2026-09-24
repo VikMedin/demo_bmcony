@@ -110,7 +110,7 @@ interface StaffUser {
   id: string;
   name: string;
   email: string;
-  role: 'superadmin' | 'admin' | 'mensajero' | 'esperando';
+  role: 'superadmin' | 'admin' | 'cocina' | 'mensajero' | 'esperando';
 }
 
 // Helper function to resize images to avoid Firestore 1MB limit
@@ -166,15 +166,27 @@ export default function App() {
   
   // Role switcher state (Simulation only - keep local)
   const { firebaseUser, profile, setProfile, loading: authLoading } = useFirebaseAuth();
-  const [demoRole, setDemoRole] = useState<'superadmin' | 'admin' | 'mensajero' | null>(null);
+  const [demoRole, setDemoRole] = useState<'superadmin' | 'admin' | 'cocina' | 'mensajero' | null>(null);
   
   const activeProfile = demoRole ? {
-    id: 'demo-user',
-    email: 'demo@demo.com',
-    name: `Usuario Demo (${demoRole === 'superadmin' ? 'Dueño' : demoRole === 'admin' ? 'Caja/Comedor' : 'Repartidor'})`,
-    phone: '',
+    id: `demo-${demoRole}`,
+    email: demoRole === 'superadmin' ? 'vmedin@gmail.com' : `${demoRole}@desayunador.com`,
+    name: demoRole === 'superadmin'
+      ? '👑 Superusuario (Dueño)'
+      : demoRole === 'cocina'
+      ? '🍳 Usuario de Cocina'
+      : demoRole === 'admin'
+      ? '💼 Usuario Administrativo'
+      : '🛵 Usuario Repartidor',
+    phone: '5512345678',
     role: demoRole,
-    avatar: 'https://ui-avatars.com/api/?name=Demo&background=f59e0b&color=fff',
+    avatar: demoRole === 'superadmin'
+      ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150'
+      : demoRole === 'cocina'
+      ? 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=150'
+      : demoRole === 'admin'
+      ? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150'
+      : 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150',
     createdAt: new Date().toISOString()
   } as any : profile;
 
@@ -182,6 +194,50 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<'dashboard' | 'kitchen' | 'caja' | 'clientes' | 'repartidor' | 'cupones' | 'config' | 'perfil' | 'menu' | 'carta_publica'>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [newPassword, setNewPassword] = useState('');
+
+  // Helper to check if an admin area is accessible for a given role according to exact system specifications
+  const canAccessTab = (tab: typeof adminTab, role: string): boolean => {
+    // 1. Superusuario (por defecto vmedin@gmail.com) y el Dueño:
+    // Control total del sistema y acceso a todas las áreas del sistema:
+    // - Acceso a Métricas y Reportes
+    // - Cocina / Kanban
+    // - Caja Chica y POS
+    // - Clientes CRM
+    // - Cupones
+    // - Menú y Platillos
+    // - Vista Repartidor
+    // - Ajustes del Negocio
+    // - Carta Digital
+    if (role === 'superadmin') return true;
+
+    // 2. Usuario de Cocina: tiene acceso a las áreas de:
+    // - Cocina / Kanban
+    // - Menú y Platillos
+    // - Carta Digital (Apoyar Comensal)
+    if (role === 'cocina') {
+      return tab === 'kitchen' || tab === 'menu' || tab === 'carta_publica' || tab === 'perfil';
+    }
+
+    // 3. Usuario Administrativo: tiene acceso a las áreas de:
+    // - Cocina / Kanban
+    // - Caja chica y POS
+    // - Clientes Estrella CRM
+    // - Cupones y Descuentos
+    // - Menú y Platillos
+    // - Carta Digital (Apoyar Comensal)
+    if (role === 'admin') {
+      return tab === 'kitchen' || tab === 'caja' || tab === 'clientes' || tab === 'cupones' || tab === 'menu' || tab === 'carta_publica' || tab === 'perfil';
+    }
+
+    // 4. Usuario Repartidor: tiene acceso a las áreas de:
+    // - Vista Repartidor
+    // - Carta Digital (Apoyar Comensal)
+    if (role === 'mensajero' || role === 'repartidor') {
+      return tab === 'repartidor' || tab === 'carta_publica' || tab === 'perfil';
+    }
+
+    return false;
+  };
 
   // Controlled states for Business Operational Status
   const [isOpenManualState, setIsOpenManualState] = useState<boolean>(businessConfig?.isOpenManual ?? true);
@@ -213,10 +269,12 @@ export default function App() {
   const [userProfiles, setUserProfiles] = useFirebaseDocument<{
     superadmin: { name: string; phone: string; avatar: string; email: string };
     admin: { name: string; phone: string; avatar: string; email: string };
+    cocina?: { name: string; phone: string; avatar: string; email: string };
     mensajero: { name: string; phone: string; avatar: string; email: string };
   }>('settings/cony_user_profiles_v3', {
-    superadmin: { name: 'Doña Cony Especial', phone: '5512345678', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150', email: 'cony@desayunador.com' },
+    superadmin: { name: 'Doña Cony Especial (Dueño)', phone: '5512345678', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150', email: 'vmedin@gmail.com' },
     admin: { name: 'Carlos Administrador', phone: '5587654321', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150', email: 'carlos@desayunador.com' },
+    cocina: { name: 'Chef Doña Cony (Cocina)', phone: '5566778899', avatar: 'https://images.unsplash.com/photo-1577219491135-ce391730fb2c?auto=format&fit=crop&w=150', email: 'cocina@desayunador.com' },
     mensajero: { name: 'Ramiro Repartidor', phone: '5544332211', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150', email: 'ramiro@desayunador.com' }
   });
 
@@ -244,7 +302,8 @@ export default function App() {
   // Add Log Entry Helper
   const addAuditLog = (actionText: string) => {
     let currentUser = 'Invitado Público';
-    if (userRole === 'superadmin') currentUser = 'Doña Cony Especial';
+    if (userRole === 'superadmin') currentUser = 'Doña Cony Especial (Dueño)';
+    else if (userRole === 'cocina') currentUser = 'Chef Doña Cony (Cocina)';
     else if (userRole === 'admin') currentUser = 'Carlos Administrador';
     else if (userRole === 'mensajero') currentUser = 'Ramiro Repartidor';
 
@@ -632,14 +691,18 @@ export default function App() {
     triggerToast('info', 'Sesión Finalizada', 'Has salido del panel administrativo.');
   };
 
-  // Auto-switch Admin Tab if role transitions and is restricted
+  // Auto-switch Admin Tab if role transitions and current tab is not allowed
   useEffect(() => {
+    if (userRole === 'publico') return;
     if (userRole === 'esperando') {
       setAdminTab('perfil');
-    } else if (userRole === 'mensajero') {
-      setAdminTab('repartidor');
-    } else if (userRole !== 'publico' && adminTab === 'repartidor') {
-      setAdminTab('dashboard');
+      return;
+    }
+    if (!canAccessTab(adminTab, userRole)) {
+      if (userRole === 'cocina') setAdminTab('kitchen');
+      else if (userRole === 'admin') setAdminTab('kitchen');
+      else if (userRole === 'mensajero' || userRole === 'repartidor') setAdminTab('repartidor');
+      else setAdminTab('dashboard');
     }
   }, [userRole]);
 
@@ -911,7 +974,16 @@ export default function App() {
               <div className="flex items-center gap-2">
                 {/* Quick Button: View Public Menu / Assist Customer without logging out */}
                 <button
-                  onClick={() => setAdminTab(adminTab === 'carta_publica' ? (userRole === 'mensajero' ? 'repartidor' : 'kitchen') : 'carta_publica')}
+                  onClick={() => {
+                    if (adminTab === 'carta_publica') {
+                      if (userRole === 'mensajero' || userRole === 'repartidor') setAdminTab('repartidor');
+                      else if (userRole === 'cocina') setAdminTab('kitchen');
+                      else if (userRole === 'admin') setAdminTab('kitchen');
+                      else setAdminTab('dashboard');
+                    } else {
+                      setAdminTab('carta_publica');
+                    }
+                  }}
                   className={`px-3 py-1.5 rounded-xl border transition-all text-xs font-bold flex items-center gap-1.5 shadow-2xs ${
                     adminTab === 'carta_publica'
                       ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-300 shadow-amber-200'
@@ -931,10 +1003,10 @@ export default function App() {
 
                 <div className="text-right hidden sm:block space-y-0.5">
                   <span className="block text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">
-                    {activeProfile?.name || userProfiles[userRole as 'superadmin' | 'admin' | 'mensajero']?.name || 'Personal Cony'}
+                    {activeProfile?.name || (userProfiles as any)[userRole]?.name || 'Personal Cony'}
                   </span>
                   <span className="inline-block text-[10px] font-bold text-gray-600 capitalize bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">
-                    {userRole === 'superadmin' ? '👑 Super Admin' : userRole === 'admin' ? '🍳 Administrativo' : userRole === 'mensajero' ? '🛵 Mensajero' : '⏳ Pendiente'}
+                    {userRole === 'superadmin' ? '👑 Superusuario / Dueño' : userRole === 'cocina' ? '🍳 Cocina' : userRole === 'admin' ? '💼 Administrativo' : userRole === 'mensajero' || userRole === 'repartidor' ? '🛵 Repartidor' : '⏳ Pendiente'}
                   </span>
                 </div>
                 <button
@@ -960,7 +1032,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setIsLoggingIn(true);
-                    triggerToast('info', 'Validación del Personal', 'Por favor ingresa tus credenciales de negocio.');
+                    triggerToast('info', 'Panel de Personal', 'Por favor selecciona un rol para probar las áreas asignadas.');
                   }}
                   className="px-3.5 py-1.5 border border-amber-200 hover:bg-amber-50 rounded-xl text-xs font-bold text-amber-900 transition-colors shadow-2xs"
                   id="admin-portal-login-btn"
@@ -976,19 +1048,249 @@ export default function App() {
 
       {/* SYSTEM ROUTER CONTROLLER */}
       <main className="flex-1 w-full flex flex-col">
+        {/* BARRA INFORMATIVA Y SELECTOR RÁPIDO DE MODO DEMO */}
+        {demoRole && (
+          <div className="bg-linear-to-r from-amber-600 via-amber-700 to-orange-700 text-white px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-sm z-30">
+            <div className="flex items-center gap-2">
+              <span className="bg-amber-900/70 text-amber-200 text-[10px] font-black uppercase px-2 py-0.5 rounded-md border border-amber-400/30 tracking-wider">
+                Modo Demo
+              </span>
+              <span className="text-xs font-medium">
+                Probando como:{' '}
+                <strong className="text-amber-100 font-extrabold">
+                  {demoRole === 'superadmin'
+                    ? '👑 Superusuario / Dueño (Control total)'
+                    : demoRole === 'cocina'
+                    ? '🍳 Usuario de Cocina'
+                    : demoRole === 'admin'
+                    ? '💼 Usuario Administrativo'
+                    : '🛵 Usuario Repartidor'}
+                </strong>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-amber-200 font-semibold mr-1 hidden sm:inline">Cambiar rol demo:</span>
+              <button
+                onClick={() => {
+                  setDemoRole('superadmin');
+                  setAdminTab('dashboard');
+                  triggerToast('info', 'Rol Demo Cambiado', 'Ahora navegando como 👑 Superusuario / Dueño (9 áreas activas).');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  demoRole === 'superadmin'
+                    ? 'bg-white text-amber-950 shadow-xs ring-2 ring-amber-300'
+                    : 'bg-amber-800/70 text-amber-100 hover:bg-amber-800'
+                }`}
+              >
+                👑 Dueño
+              </button>
+              <button
+                onClick={() => {
+                  setDemoRole('cocina');
+                  setAdminTab('kitchen');
+                  triggerToast('info', 'Rol Demo Cambiado', 'Ahora navegando como 🍳 Usuario de Cocina (Cocina, Menú y Carta).');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  demoRole === 'cocina'
+                    ? 'bg-white text-amber-950 shadow-xs ring-2 ring-amber-300'
+                    : 'bg-amber-800/70 text-amber-100 hover:bg-amber-800'
+                }`}
+              >
+                🍳 Cocina
+              </button>
+              <button
+                onClick={() => {
+                  setDemoRole('admin');
+                  setAdminTab('kitchen');
+                  triggerToast('info', 'Rol Demo Cambiado', 'Ahora navegando como 💼 Usuario Administrativo (Cocina, Caja, Clientes, Cupones, Menú y Carta).');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  demoRole === 'admin'
+                    ? 'bg-white text-amber-950 shadow-xs ring-2 ring-amber-300'
+                    : 'bg-amber-800/70 text-amber-100 hover:bg-amber-800'
+                }`}
+              >
+                💼 Administrativo
+              </button>
+              <button
+                onClick={() => {
+                  setDemoRole('mensajero');
+                  setAdminTab('repartidor');
+                  triggerToast('info', 'Rol Demo Cambiado', 'Ahora navegando como 🛵 Usuario Repartidor (Repartidor y Carta).');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  demoRole === 'mensajero'
+                    ? 'bg-white text-amber-950 shadow-xs ring-2 ring-amber-300'
+                    : 'bg-amber-800/70 text-amber-100 hover:bg-amber-800'
+                }`}
+              >
+                🛵 Repartidor
+              </button>
+              <button
+                onClick={() => {
+                  setDemoRole(null);
+                  triggerToast('info', 'Modo Demo', 'Has salido del modo demostración.');
+                }}
+                className="ml-2 px-2 py-1 bg-black/30 hover:bg-black/50 text-white rounded-lg text-xs font-semibold transition-colors"
+                title="Salir del Modo Demo"
+              >
+                ✕ Salir
+              </button>
+            </div>
+          </div>
+        )}
+
         {userRole === 'publico' ? (
           isLoggingIn ? (
-            // DEMO LOGIN SCREEN (TEMPORARY FOR PRESENTATION)
-            <div className="py-12 bg-amber-50/20 flex-1 flex items-center justify-center p-4">
-              <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full border border-amber-200">
-                <h2 className="text-2xl font-serif font-bold text-amber-950 mb-2 text-center">Modo Demo Activado</h2>
-                <p className="text-gray-500 text-sm text-center mb-6">Selecciona un rol para probar la aplicación rápida sin registrarte.</p>
-                <div className="space-y-3">
-                  <button onClick={() => { setDemoRole('superadmin'); setIsLoggingIn(false); }} className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold transition-colors">Ingresar como Administrador (Dueño)</button>
-                  <button onClick={() => { setDemoRole('admin'); setIsLoggingIn(false); }} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold transition-colors">Ingresar como Cajero/Comedor</button>
-                  <button onClick={() => { setDemoRole('mensajero'); setIsLoggingIn(false); }} className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold transition-colors">Ingresar como Repartidor</button>
+            // DEMO LOGIN SCREEN (ASSIGNED AREAS BREAKDOWN)
+            <div className="py-8 bg-linear-to-b from-amber-50/50 via-white to-orange-50/30 flex-1 flex items-center justify-center p-4">
+              <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl max-w-xl w-full border border-amber-200">
+                <div className="text-center mb-6">
+                  <span className="inline-block px-3 py-1 bg-amber-100 text-amber-900 text-xs font-extrabold rounded-full uppercase tracking-wider mb-2 border border-amber-200">
+                    Modo Demostración Activo
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl font-serif font-bold text-amber-950">
+                    Asignación de Áreas por Usuario
+                  </h2>
+                  <p className="text-gray-500 text-xs sm:text-sm mt-1 max-w-md mx-auto">
+                    Selecciona un perfil de demostración para explorar la plataforma con las áreas y permisos específicos asignados a cada rol:
+                  </p>
                 </div>
-                <button onClick={() => setIsLoggingIn(false)} className="w-full mt-6 py-2 text-gray-500 hover:bg-gray-50 rounded-xl font-bold text-sm border border-gray-200 transition-colors">Volver a la Carta Pública</button>
+
+                <div className="space-y-3">
+                  {/* 1. Usuario Principal / Dueño */}
+                  <button
+                    onClick={() => {
+                      setDemoRole('superadmin');
+                      setAdminTab('dashboard');
+                      setIsLoggingIn(false);
+                      triggerToast('success', 'Sesión Iniciada', 'Ingresaste como Superusuario / Dueño con Control Total del Sistema.');
+                    }}
+                    className="w-full text-left p-4 rounded-2xl border-2 border-amber-400 bg-linear-to-r from-amber-50 to-orange-50/50 hover:border-amber-500 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center text-xl shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                          👑
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-bold text-sm text-amber-950">Usuario Principal: Superusuario y Dueño</h3>
+                            <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">vmedin@gmail.com</span>
+                          </div>
+                          <p className="text-[11px] text-amber-800 font-semibold mt-0.5">Control total del sistema • Acceso a todas las áreas (9)</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Métricas y Reportes</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Cocina / Kanban</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Caja Chica y POS</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Clientes CRM</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Cupones</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Menú y Platillos</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Vista Repartidor</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Ajustes del Negocio</span>
+                      <span className="bg-white/90 border border-amber-200 font-medium px-1.5 py-0.5 rounded">Carta Digital</span>
+                    </div>
+                  </button>
+
+                  {/* 2. Usuario de Cocina */}
+                  <button
+                    onClick={() => {
+                      setDemoRole('cocina');
+                      setAdminTab('kitchen');
+                      setIsLoggingIn(false);
+                      triggerToast('success', 'Sesión Iniciada', 'Ingresaste como Usuario de Cocina.');
+                    }}
+                    className="w-full text-left p-4 rounded-2xl border border-gray-200 bg-white hover:border-orange-400 hover:bg-orange-50/30 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center text-xl shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                          🍳
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm text-gray-900 group-hover:text-orange-950">Usuario de Cocina</h3>
+                          <p className="text-[11px] text-gray-500 mt-0.5">Operación del comal, recetas y apoyo en carta (3 áreas)</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 font-medium px-1.5 py-0.5 rounded">Cocina / Kanban</span>
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 font-medium px-1.5 py-0.5 rounded">Menú y Platillos</span>
+                      <span className="bg-orange-50 border border-orange-200 text-orange-900 font-medium px-1.5 py-0.5 rounded">Carta Digital (Apoyar Comensal)</span>
+                    </div>
+                  </button>
+
+                  {/* 3. Usuario Administrativo */}
+                  <button
+                    onClick={() => {
+                      setDemoRole('admin');
+                      setAdminTab('kitchen');
+                      setIsLoggingIn(false);
+                      triggerToast('success', 'Sesión Iniciada', 'Ingresaste como Usuario Administrativo.');
+                    }}
+                    className="w-full text-left p-4 rounded-2xl border border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50/30 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                          💼
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm text-gray-900 group-hover:text-blue-950">Usuario Administrativo</h3>
+                          <p className="text-[11px] text-gray-500 mt-0.5">Gestión operativa, caja, promociones y clientes (6 áreas)</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Cocina / Kanban</span>
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Caja chica y POS</span>
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Clientes Estrella CRM</span>
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Cupones y Descuentos</span>
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Menú y Platillos</span>
+                      <span className="bg-blue-50 border border-blue-200 text-blue-900 font-medium px-1.5 py-0.5 rounded">Carta Digital (Apoyar Comensal)</span>
+                    </div>
+                  </button>
+
+                  {/* 4. Usuario Repartidor */}
+                  <button
+                    onClick={() => {
+                      setDemoRole('mensajero');
+                      setAdminTab('repartidor');
+                      setIsLoggingIn(false);
+                      triggerToast('success', 'Sesión Iniciada', 'Ingresaste como Usuario Repartidor.');
+                    }}
+                    className="w-full text-left p-4 rounded-2xl border border-gray-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/30 hover:shadow-md transition-all group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xl shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                          🛵
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm text-gray-900 group-hover:text-emerald-950">Usuario Repartidor</h3>
+                          <p className="text-[11px] text-gray-500 mt-0.5">Rutas, entregas domiciliarias y consulta de carta (2 áreas)</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex flex-wrap gap-1 text-[10px] text-gray-600">
+                      <span className="bg-emerald-50 border border-emerald-200 text-emerald-900 font-medium px-1.5 py-0.5 rounded">Vista Repartidor</span>
+                      <span className="bg-emerald-50 border border-emerald-200 text-emerald-900 font-medium px-1.5 py-0.5 rounded">Carta Digital (Apoyar Comensal)</span>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-between">
+                  <button
+                    onClick={() => setIsLoggingIn(false)}
+                    className="w-full py-2.5 text-gray-600 hover:bg-gray-100 rounded-xl font-bold text-xs border border-gray-200 transition-colors text-center"
+                  >
+                    ← Volver a la Carta Pública
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -1019,27 +1321,8 @@ export default function App() {
                 </div>
 
                 <nav className="space-y-1.5">
-                  {/* Carta Pública / Asistencia a Comensales - DISPONIBLE PARA TODOS LOS ROLES (SuperAdmin, Admin, Mensajero) */}
-                  <button
-                    onClick={() => setAdminTab('carta_publica')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
-                      adminTab === 'carta_publica'
-                        ? 'bg-amber-500 text-white font-extrabold shadow-sm'
-                        : 'text-amber-950 bg-amber-50/70 border border-amber-200/80 hover:bg-amber-100/80 hover:text-amber-900'
-                    }`}
-                    id="tab-carta-publica"
-                  >
-                    <span className="flex items-center gap-2">
-                      <BookOpen className={`w-4 h-4 ${adminTab === 'carta_publica' ? 'text-white' : 'text-amber-700'}`} />
-                      Carta Digital (Apoyar Comensal)
-                    </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${adminTab === 'carta_publica' ? 'bg-amber-600 text-white' : 'bg-amber-200 text-amber-900'}`}>
-                      En vivo
-                    </span>
-                  </button>
-
-                  {/* Dashboard - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Acceso a Métricas y Reportes - Superusuario y Dueño */}
+                  {canAccessTab('dashboard', userRole) && (
                     <button
                       onClick={() => setAdminTab('dashboard')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1051,13 +1334,13 @@ export default function App() {
                     >
                       <span className="flex items-center gap-2">
                         <Clock className="w-4 h-4 text-amber-600" />
-                        Métricas y Reportes
+                        Acceso a Métricas y Reportes
                       </span>
                     </button>
                   )}
 
-                  {/* Kitchen / Kanban - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Cocina / Kanban - Superusuario, Cocina y Administrativo */}
+                  {canAccessTab('kitchen', userRole) && (
                     <button
                       onClick={() => setAdminTab('kitchen')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1074,8 +1357,8 @@ export default function App() {
                     </button>
                   )}
 
-                  {/* Caja / POS - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Caja Chica y POS - Superusuario y Administrativo */}
+                  {canAccessTab('caja', userRole) && (
                     <button
                       onClick={() => setAdminTab('caja')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1092,8 +1375,8 @@ export default function App() {
                     </button>
                   )}
 
-                  {/* Clientes CRM - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Clientes CRM - Superusuario y Administrativo */}
+                  {canAccessTab('clientes', userRole) && (
                     <button
                       onClick={() => setAdminTab('clientes')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1110,8 +1393,8 @@ export default function App() {
                     </button>
                   )}
 
-                  {/* Cupones de Descuento - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Cupones - Superusuario y Administrativo */}
+                  {canAccessTab('cupones', userRole) && (
                     <button
                       onClick={() => setAdminTab('cupones')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1133,29 +1416,8 @@ export default function App() {
                     </button>
                   )}
 
-                  {/* Delivery / Repartidor - Authorized to ALL admin roles */}
-                  <button
-                    onClick={() => setAdminTab('repartidor')}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
-                      adminTab === 'repartidor'
-                        ? 'bg-amber-50 text-amber-900 font-extrabold shadow-xs'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
-                    id="tab-repartidor"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-amber-600" />
-                      Vista Repartidor
-                    </span>
-                    {orders.filter(o => o.status === 'camino').length > 0 && (
-                      <span className="bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                        {orders.filter(o => o.status === 'camino').length}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Menú Management - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Menú y Platillos - Superusuario, Cocina y Administrativo */}
+                  {canAccessTab('menu', userRole) && (
                     <button
                       onClick={() => setAdminTab('menu')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1172,8 +1434,31 @@ export default function App() {
                     </button>
                   )}
 
-                  {/* Configurations Settings - Authorized to SuperAdmin & Admin */}
-                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                  {/* Vista Repartidor - Superusuario y Repartidor */}
+                  {canAccessTab('repartidor', userRole) && (
+                    <button
+                      onClick={() => setAdminTab('repartidor')}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                        adminTab === 'repartidor'
+                          ? 'bg-amber-50 text-amber-900 font-extrabold shadow-xs'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                      id="tab-repartidor"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-600" />
+                        Vista Repartidor
+                      </span>
+                      {orders.filter(o => o.status === 'camino').length > 0 && (
+                        <span className="bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                          {orders.filter(o => o.status === 'camino').length}
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  {/* Ajustes del Negocio - Superusuario y Dueño */}
+                  {canAccessTab('config', userRole) && (
                     <button
                       onClick={() => setAdminTab('config')}
                       className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
@@ -1189,6 +1474,27 @@ export default function App() {
                       </span>
                     </button>
                   )}
+
+                  {/* Carta Digital (Apoyar Comensal) - Disponible para Todos */}
+                  {canAccessTab('carta_publica', userRole) && (
+                    <button
+                      onClick={() => setAdminTab('carta_publica')}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                        adminTab === 'carta_publica'
+                          ? 'bg-amber-500 text-white font-extrabold shadow-sm'
+                          : 'text-amber-950 bg-amber-50/70 border border-amber-200/80 hover:bg-amber-100/80 hover:text-amber-900'
+                      }`}
+                      id="tab-carta-publica"
+                    >
+                      <span className="flex items-center gap-2">
+                        <BookOpen className={`w-4 h-4 ${adminTab === 'carta_publica' ? 'text-white' : 'text-amber-700'}`} />
+                        Carta Digital (Apoyar Comensal)
+                      </span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${adminTab === 'carta_publica' ? 'bg-amber-600 text-white' : 'bg-amber-200 text-amber-900'}`}>
+                        En vivo
+                      </span>
+                    </button>
+                  )}
                 </nav>
 
                 <div className="pt-8 mt-8 border-t border-gray-100 flex flex-col gap-2">
@@ -1198,7 +1504,18 @@ export default function App() {
                       ✅ Cambios Reflejados Correctamente
                     </p>
                     <p className="text-[9px] text-gray-500 mt-0.5">
-                      Este es tu rol de prueba actual: <strong className="text-amber-900">{userRole.toUpperCase()}</strong>.
+                      Rol activo:{' '}
+                      <strong className="text-amber-900 font-bold">
+                        {userRole === 'superadmin'
+                          ? '👑 Superusuario / Dueño (Control total)'
+                          : userRole === 'cocina'
+                          ? '🍳 Cocina (Cocina, Menú y Carta)'
+                          : userRole === 'admin'
+                          ? '💼 Administrativo (6 áreas)'
+                          : userRole === 'mensajero' || userRole === 'repartidor'
+                          ? '🛵 Repartidor (Repartidor y Carta)'
+                          : userRole.toUpperCase()}
+                      </strong>.
                     </p>
                   </div>
                   <button
@@ -1239,10 +1556,10 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <button
-                          onClick={() => setAdminTab(userRole === 'mensajero' ? 'repartidor' : 'kitchen')}
+                          onClick={() => setAdminTab(userRole === 'mensajero' || userRole === 'repartidor' ? 'repartidor' : userRole === 'cocina' ? 'kitchen' : userRole === 'admin' ? 'kitchen' : 'dashboard')}
                           className="px-3.5 py-2 bg-white border border-amber-300 text-amber-950 hover:bg-amber-50 rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
                         >
-                          <span>Volver a {userRole === 'mensajero' ? 'Repartidor' : 'Operaciones'}</span>
+                          <span>Volver a {userRole === 'mensajero' || userRole === 'repartidor' ? 'Repartidor' : userRole === 'cocina' ? 'Cocina' : userRole === 'admin' ? 'Operaciones' : 'Métricas'}</span>
                         </button>
                       </div>
                     </div>
@@ -1259,19 +1576,19 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {adminTab === 'dashboard' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'dashboard' && canAccessTab('dashboard', userRole) && (
                   <div className="animate-fade-in">
                     <AdminDashboard
                       orders={orders}
                       expenses={expenses}
                       triggerToast={triggerToast}
-                      role={userRole as 'superadmin' | 'admin'}
+                      role={userRole as any}
                       config={businessConfig}
                     />
                   </div>
                 )}
 
-                {adminTab === 'kitchen' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'kitchen' && canAccessTab('kitchen', userRole) && (
                   <div className="animate-fade-in">
                     <AdminKitchen
                       orders={orders}
@@ -1288,7 +1605,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'caja' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'caja' && canAccessTab('caja', userRole) && (
                   <div className="animate-fade-in">
                     <AdminCaja
                       orders={orders}
@@ -1303,7 +1620,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'clientes' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'clientes' && canAccessTab('clientes', userRole) && (
                   <div className="animate-fade-in">
                     <AdminClientes
                       clients={unifiedClients}
@@ -1313,7 +1630,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'cupones' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'cupones' && canAccessTab('cupones', userRole) && (
                   <div className="animate-fade-in">
                     <AdminCupones
                       coupons={coupons}
@@ -1325,7 +1642,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'repartidor' && (
+                {adminTab === 'repartidor' && canAccessTab('repartidor', userRole) && (
                   <div className="animate-fade-in">
                     <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 mb-6 flex items-start gap-3">
                       <Clock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
@@ -1346,7 +1663,7 @@ export default function App() {
                   </div>
                 )}
 
-                {adminTab === 'config' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'config' && canAccessTab('config', userRole) && (
                   <div className="animate-fade-in space-y-8">
                     {/* Header settings */}
                     <div className="bg-white p-5 rounded-2xl border border-gray-200">
@@ -1826,7 +2143,7 @@ export default function App() {
 
                   </div>
                 )}
-                {adminTab === 'menu' && (userRole === 'superadmin' || userRole === 'admin') && (
+                {adminTab === 'menu' && canAccessTab('menu', userRole) && (
                   <div className="animate-fade-in space-y-8">
                     {/* PLATILLOS MANAGEMENT (Alta y edición de platillos/precios) */}
                     <div className="bg-white p-6 rounded-2xl border border-gray-200">

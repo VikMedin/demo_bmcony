@@ -12,9 +12,8 @@ interface AdminDashboardProps {
   orders: FoodOrder[];
   expenses: Expense[];
   triggerToast: (type: 'success' | 'error' | 'info', title: string, description?: string) => void;
-  role: 'superadmin' | 'admin' | 'mensajero' | string;
+  role: 'superadmin' | 'admin' | 'cocina' | 'mensajero';
   config: BusinessConfig;
-  onNavigateTab?: (tab: any) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -22,8 +21,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   expenses,
   triggerToast,
   role,
-  config,
-  onNavigateTab
+  config
 }) => {
   const [filterPeriod, setFilterPeriod] = useState<'day' | 'week' | 'month' | 'custom'>('month');
   const [startDate, setStartDate] = useState<string>('2026-09-01');
@@ -211,27 +209,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6" id="dashboard-stats-view">
-      {/* Superusuario Owner Welcome and Quick Link to Ajustes */}
-      {role === 'superadmin' && onNavigateTab && (
-        <div className="bg-gradient-to-r from-amber-500 to-amber-600 rounded-2xl p-4 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-xl shrink-0">
-              👑
-            </div>
-            <div>
-              <h3 className="font-bold text-sm">Panel Maestro del Superusuario (Dueño)</h3>
-              <p className="text-xs text-amber-100">Acceso a todo sin restricciones: parámetros del negocio, horarios y asignación de roles al personal.</p>
-            </div>
-          </div>
-          <button
-            onClick={() => onNavigateTab('config')}
-            className="px-4 py-2 bg-white text-amber-900 hover:bg-amber-50 rounded-xl text-xs font-black shadow-sm shrink-0 flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-          >
-            ⚙️ Ir a Ajustes del Sistema y Roles →
-          </button>
-        </div>
-      )}
-
       {/* Metrics Period Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-xl border border-gray-200">
         <div>

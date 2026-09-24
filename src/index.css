@@ -30,16 +30,6 @@ html.font-size-large {
   font-size: clamp(105%, 2vw + 60%, 125%);
 }
 
-/* Evitar que elementos excedan su contenedor padre al reducir la pantalla */
-* {
-  max-width: 100%;
-}
-
-/* Excepciones donde max-width: 100% no es deseado o rompe el layout */
-.flex, .grid, img, svg, iframe, table, th, td, tr, thead, tbody {
-  max-width: none;
-}
-
 /* Tablas con scroll horizontal en móviles para no deformar la app */
 .table-responsive {
   display: block;

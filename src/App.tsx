@@ -3,11 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useFirebaseCollection, useFirebaseDocument } from './hooks/useFirebaseState';
 import { useFirebaseAuth } from './hooks/useFirebaseAuth';
 import { signOut, updatePassword } from 'firebase/auth';
-import { auth } from './firebase';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { cleanFirestoreData } from './utils/cleanFirestoreData';
+import { normalizePhone, calculateClientTier } from './utils/phoneUtils';
 import {
   ClientMenu
 } from './components/ClientMenu';
@@ -30,9 +33,13 @@ import {
   AdminRepartidor
 } from './components/AdminRepartidor';
 import {
+  AdminCupones
+} from './components/AdminCupones';
+import {
   CommonToast
 } from './components/CommonToast';
 import { getThemeStyles } from './utils/colors';
+import { notifyMessengerMobile } from './utils/deliveryNotification';
 
 import {
   Client,
@@ -43,6 +50,7 @@ import {
   FoodOrder,
   Expense,
   BusinessConfig,
+  Coupon,
   ToastMessage
 } from './types';
 
@@ -54,6 +62,7 @@ import {
   INITIAL_RESTO_CLIENTS,
   INITIAL_FOOD_ORDERS,
   INITIAL_EXPENSES,
+  INITIAL_COUPONS,
   DEFAULT_BUSINESS_CONFIG
 } from './data/seedData';
 
@@ -64,6 +73,7 @@ import {
   ShieldAlert,
   Settings,
   Plus,
+  Minus,
   Trash2,
   Edit2,
   Clock,
@@ -80,7 +90,12 @@ import {
   ChevronUp,
   ChevronDown,
   X,
-  ImageIcon
+  ImageIcon,
+  Tag,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  DollarSign
 } from 'lucide-react';
 
 interface AuditLog {
@@ -146,6 +161,7 @@ export default function App() {
   const [restoClients, setRestoClients] = useFirebaseCollection<RestoClient>('cony_resto_clients', INITIAL_RESTO_CLIENTS);
   const [orders, setOrders] = useFirebaseCollection<FoodOrder>('cony_orders', INITIAL_FOOD_ORDERS);
   const [expenses, setExpenses] = useFirebaseCollection<Expense>('cony_expenses', INITIAL_EXPENSES);
+  const [coupons, setCoupons] = useFirebaseCollection<Coupon>('cony_coupons', INITIAL_COUPONS);
   const [businessConfig, setBusinessConfig] = useFirebaseDocument<BusinessConfig>('settings/cony_business_config', DEFAULT_BUSINESS_CONFIG);
   
   // Role switcher state (Simulation only - keep local)
@@ -163,9 +179,36 @@ export default function App() {
   } as any : profile;
 
   const userRole = activeProfile?.role || 'publico';
-  const [adminTab, setAdminTab] = useState<'dashboard' | 'kitchen' | 'caja' | 'clientes' | 'repartidor' | 'config' | 'perfil' | 'menu'>('dashboard');
+  const [adminTab, setAdminTab] = useState<'dashboard' | 'kitchen' | 'caja' | 'clientes' | 'repartidor' | 'cupones' | 'config' | 'perfil' | 'menu' | 'carta_publica'>('dashboard');
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [newPassword, setNewPassword] = useState('');
+
+  // Controlled states for Business Operational Status
+  const [isOpenManualState, setIsOpenManualState] = useState<boolean>(businessConfig?.isOpenManual ?? true);
+  const [is24HoursState, setIs24HoursState] = useState<boolean>(Boolean(businessConfig?.is24Hours));
+  const [scheduleStartState, setScheduleStartState] = useState<string>(
+    businessConfig?.scheduleStart && businessConfig.scheduleStart !== '00:00'
+      ? businessConfig.scheduleStart
+      : '07:30'
+  );
+  const [scheduleEndState, setScheduleEndState] = useState<string>(
+    businessConfig?.scheduleEnd && businessConfig.scheduleEnd !== '24:00'
+      ? businessConfig.scheduleEnd
+      : '13:30'
+  );
+
+  useEffect(() => {
+    if (businessConfig) {
+      setIsOpenManualState(businessConfig.isOpenManual ?? true);
+      setIs24HoursState(Boolean(businessConfig.is24Hours));
+      if (businessConfig.scheduleStart && businessConfig.scheduleStart !== '00:00') {
+        setScheduleStartState(businessConfig.scheduleStart);
+      }
+      if (businessConfig.scheduleEnd && businessConfig.scheduleEnd !== '24:00') {
+        setScheduleEndState(businessConfig.scheduleEnd);
+      }
+    }
+  }, [businessConfig?.isOpenManual, businessConfig?.is24Hours, businessConfig?.scheduleStart, businessConfig?.scheduleEnd]);
 
   const [userProfiles, setUserProfiles] = useFirebaseDocument<{
     superadmin: { name: string; phone: string; avatar: string; email: string };
@@ -215,50 +258,196 @@ export default function App() {
     setAuditLogs(prev => [newLog, ...prev]);
   };
 
+  // --- Unified Real-Time CRM Clients Engine ---
+  // Constant is the telephone number: it determines the entire history of orders placed,
+  // accumulates orderCount and totalSpent, and categorizes loyalty/VIP tiers accordingly.
+  const unifiedClients: RestoClient[] = useMemo(() => {
+    interface ClientAgg {
+      id: string;
+      name: string;
+      phone: string;
+      address: string;
+      orderCount: number;
+      totalSpent: number;
+      lastOrderTime?: string;
+    }
+
+    const orderAggMap = new Map<string, ClientAgg>();
+
+    // 1. Group all orders strictly by normalized phone number
+    (orders || []).forEach(order => {
+      if (order.status === 'cancelado') return;
+      const rawName = (order.clientName || '').trim();
+      const phoneNorm = normalizePhone(order.clientPhone);
+
+      // Skip generic walk-in counter orders with placeholder phone unless a real client name was supplied
+      if (rawName.toLowerCase() === 'comensal mostrador' && (!phoneNorm || phoneNorm === '5500000000')) {
+        return;
+      }
+
+      // Telephone number is the constant identifier
+      const key = (phoneNorm && phoneNorm.length >= 7)
+        ? `phone_${phoneNorm}`
+        : (rawName ? `name_${rawName.toLowerCase()}` : '');
+
+      if (!key) return;
+
+      const orderCost = Number(order.total) || 0;
+      const orderAddr = order.address && order.address !== 'Retiro en Local' ? order.address : '';
+      const orderDate = order.createdAt;
+
+      const existing = orderAggMap.get(key);
+      if (!existing) {
+        orderAggMap.set(key, {
+          id: `client-${phoneNorm || order.id}`,
+          name: rawName || 'Comensal',
+          phone: order.clientPhone || phoneNorm,
+          address: orderAddr || order.address || 'Retiro en Local',
+          orderCount: 1,
+          totalSpent: orderCost,
+          lastOrderTime: orderDate
+        });
+      } else {
+        existing.orderCount += 1;
+        existing.totalSpent += orderCost;
+        // Keep the latest name associated with this phone number
+        if (rawName && (!existing.lastOrderTime || !orderDate || new Date(orderDate) >= new Date(existing.lastOrderTime))) {
+          existing.name = rawName;
+        }
+        if (orderAddr && (!existing.address || existing.address === 'Retiro en Local')) {
+          existing.address = orderAddr;
+        }
+        if (order.clientPhone) {
+          existing.phone = order.clientPhone;
+        }
+        if (orderDate && (!existing.lastOrderTime || new Date(orderDate) > new Date(existing.lastOrderTime))) {
+          existing.lastOrderTime = orderDate;
+        }
+      }
+    });
+
+    // 2. Merge with base/stored restoClients using the phone number as constant
+    const result: RestoClient[] = [];
+    const processedKeys = new Set<string>();
+
+    (restoClients || []).forEach(base => {
+      const phoneNorm = normalizePhone(base.phone);
+      const key = (phoneNorm && phoneNorm.length >= 7)
+        ? `phone_${phoneNorm}`
+        : ((base.name || '').trim() ? `name_${base.name.trim().toLowerCase()}` : '');
+
+      if (!key) return;
+      processedKeys.add(key);
+
+      const live = orderAggMap.get(key);
+      if (live) {
+        // Base client has order history on this phone:
+        // Use total orders (max between base record and live orders count)
+        const totalCount = Math.max(base.orderCount || 0, live.orderCount);
+        const totalSpent = Math.max(base.totalSpent || 0, live.totalSpent);
+        // Name is the freshest name from orders (e.g. "Vik" on latest orders)
+        const clientName = live.name || base.name;
+
+        result.push({
+          id: base.id,
+          name: clientName,
+          phone: base.phone || live.phone,
+          address: (base.address && base.address !== 'Retiro en Local') ? base.address : (live.address || base.address),
+          orderCount: totalCount,
+          totalSpent: totalSpent,
+          tier: calculateClientTier(totalCount)
+        });
+      } else {
+        result.push({
+          ...base,
+          tier: calculateClientTier(base.orderCount || 0)
+        });
+      }
+    });
+
+    // 3. Add clients discovered from orders who are not yet in restoClients
+    orderAggMap.forEach((live, key) => {
+      if (!processedKeys.has(key)) {
+        processedKeys.add(key);
+        result.push({
+          id: live.id,
+          name: live.name,
+          phone: live.phone,
+          address: live.address || 'Retiro en Local',
+          orderCount: live.orderCount,
+          totalSpent: live.totalSpent,
+          tier: calculateClientTier(live.orderCount)
+        });
+      }
+    });
+
+    // 4. Sort: Star/VIP first, then Honor, then Frecuente, then Nuevo; then orders desc, totalSpent desc
+    result.sort((a, b) => {
+      const tierRank: Record<string, number> = { estrella: 4, honor: 3, frecuente: 2, nuevo: 1 };
+      const rankDiff = (tierRank[b.tier] || 0) - (tierRank[a.tier] || 0);
+      if (rankDiff !== 0) return rankDiff;
+      if (b.orderCount !== a.orderCount) return b.orderCount - a.orderCount;
+      return b.totalSpent - a.totalSpent;
+    });
+
+    return result;
+  }, [orders, restoClients]);
+
   // --- CRM Update Hook (When order is completed or added) ---
   const updateCRMForOrder = (order: FoodOrder) => {
-    const phone = order.clientPhone.replace(/\D/g, '');
-    const clientName = order.clientName;
+    const rawName = (order.clientName || '').trim();
+    const phoneNorm = normalizePhone(order.clientPhone);
+    const clientName = rawName || 'Comensal';
     const clientAddress = order.address || 'Retiro en Local';
-    const amount = order.total;
+    const amount = Number(order.total) || 0;
+
+    if (rawName.toLowerCase() === 'comensal mostrador' && (!phoneNorm || phoneNorm === '5500000000')) {
+      return;
+    }
 
     setRestoClients(prevClients => {
-      const existingIdx = prevClients.findIndex(c => c.phone.replace(/\D/g, '') === phone);
+      // Find client strictly by normalized phone number
+      const existingIdx = prevClients.findIndex(c => {
+        const cPhone = normalizePhone(c.phone);
+        if (phoneNorm && cPhone && phoneNorm === cPhone) {
+          return true;
+        }
+        if (!phoneNorm && !cPhone && (c.name || '').trim().toLowerCase() === rawName.toLowerCase()) {
+          return true;
+        }
+        return false;
+      });
+
       if (existingIdx > -1) {
-        // Update existing client
+        // Update existing client for this phone number
         return prevClients.map((c, idx) => {
           if (idx === existingIdx) {
-            const nextCount = c.orderCount + 1;
-            const nextSpent = c.totalSpent + amount;
-            let nextTier: RestoClient['tier'] = 'nuevo';
-            
-            if (nextCount > 10) nextTier = 'estrella';
-            else if (nextCount >= 6) nextTier = 'honor';
-            else if (nextCount >= 3) nextTier = 'frecuente';
-
+            const nextCount = (c.orderCount || 0) + 1;
+            const nextSpent = (c.totalSpent || 0) + amount;
             return {
               ...c,
-              name: clientName, // keep name fresh
+              name: clientName !== 'Comensal' ? clientName : c.name, // Keep freshest name
+              phone: order.clientPhone || c.phone,
               address: clientAddress !== 'Retiro en Local' ? clientAddress : c.address,
               orderCount: nextCount,
               totalSpent: nextSpent,
-              tier: nextTier
+              tier: calculateClientTier(nextCount)
             };
           }
           return c;
         });
       } else {
-        // Create new client record
+        // Create new client record for this phone number
         return [
           ...prevClients,
           {
-            id: `client-${Date.now()}`,
-            phone,
+            id: `client-${phoneNorm || Date.now()}`,
+            phone: order.clientPhone || '',
             name: clientName,
             address: clientAddress,
             orderCount: 1,
             totalSpent: amount,
-            tier: 'nuevo'
+            tier: calculateClientTier(1)
           }
         ];
       }
@@ -267,10 +456,31 @@ export default function App() {
 
   // --- Desayunos Cony Handlers ---
   const handlePlaceOrder = (newOrder: FoodOrder) => {
-    setOrders(prev => [newOrder, ...prev]);
-    updateCRMForOrder(newOrder);
-    addAuditLog(`Comensal ordenó por WhatsApp: ${newOrder.orderNumber} por $${newOrder.total.toFixed(2)}.`);
-    triggerToast('success', '¡Pedido Registrado!', `Folio: ${newOrder.orderNumber}. Revisa tu WhatsApp para enviar.`);
+    const sanitizedOrder: FoodOrder = {
+      ...newOrder,
+      address: newOrder.deliveryType === 'domicilio'
+        ? (newOrder.address?.trim() || 'Entrega a Domicilio')
+        : 'Retiro en Local',
+      notes: newOrder.notes || ''
+    };
+
+    setOrders(prev => [sanitizedOrder, ...prev]);
+    // Save to Firestore so kitchen can see incoming customer orders in real-time
+    const firestorePayload = cleanFirestoreData(sanitizedOrder);
+    setDoc(doc(db, 'cony_orders', sanitizedOrder.id), firestorePayload).catch((err) => {
+      console.warn('Firestore setDoc notice for order:', err);
+    });
+    updateCRMForOrder(sanitizedOrder);
+    
+    // Play kitchen chime sound
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(() => {});
+    } catch {}
+
+    addAuditLog(`Comensal ordenó por WhatsApp: ${sanitizedOrder.orderNumber} por $${sanitizedOrder.total.toFixed(2)}.`);
+    triggerToast('success', '¡Pedido Registrado!', `Folio: ${sanitizedOrder.orderNumber}. Revisa tu WhatsApp para enviar.`);
   };
 
   const handleUpdateOrderStatus = (orderId: string, nextStatus: FoodOrder['status']) => {
@@ -279,6 +489,12 @@ export default function App() {
         if (o.id === orderId) {
           const updated = { ...o, status: nextStatus };
           addAuditLog(`Actualizó estatus del pedido ${o.orderNumber} a: "${nextStatus}".`);
+
+          // If order is ready and for delivery, trigger mobile notification for the messenger
+          if (nextStatus === 'listo' && o.deliveryType === 'domicilio') {
+            notifyMessengerMobile(updated);
+          }
+
           return updated;
         }
         return o;
@@ -320,6 +536,19 @@ export default function App() {
     triggerToast('success', 'Platillo Editado', `Los cambios en "${updatedDish.name}" fueron guardados.`);
   };
 
+  const handleToggleHideDish = (id: string) => {
+    const item = foodItems.find(f => f.id === id);
+    if (!item) return;
+    const nextHidden = !item.hidden;
+    setFoodItems(prev => prev.map(f => f.id === id ? { ...f, hidden: nextHidden } : f));
+    addAuditLog(`${nextHidden ? 'Ocultó' : 'Mostró'} en menú comensal: "${item.name}".`);
+    triggerToast(
+      nextHidden ? 'info' : 'success',
+      nextHidden ? 'Platillo Ocultado' : 'Platillo Visible',
+      `"${item.name}" ${nextHidden ? 'ya NO se mostrará a comensales en el menú' : 'ahora es visible para los comensales'}.`
+    );
+  };
+
   const handleAddOrderCaja = (newOrder: FoodOrder) => {
     setOrders(prev => [newOrder, ...prev]);
     updateCRMForOrder(newOrder);
@@ -343,8 +572,41 @@ export default function App() {
 
   const handleSaveConfig = (newConfig: BusinessConfig) => {
     setBusinessConfig(newConfig);
+    setDoc(doc(db, 'settings', 'cony_business_config'), cleanFirestoreData(newConfig)).catch(() => {});
     addAuditLog('Modificó configuraciones del negocio (teléfono, horario, pie de ticket).');
     triggerToast('success', 'Configuraciones Guardadas', 'Doña Cony aplicó los cambios correctamente.');
+  };
+
+  // --- Cupones Handlers ---
+  const handleAddCoupon = async (newCoupon: Coupon) => {
+    try {
+      await setCoupons(prev => [newCoupon, ...prev]);
+      addAuditLog(`Creó nuevo cupón de descuento: ${newCoupon.code} (${newCoupon.discountPercentage}% OFF).`);
+      triggerToast('success', 'Cupón Creado con Éxito', `El código "${newCoupon.code}" ahora está disponible para comensales.`);
+    } catch (e: any) {
+      triggerToast('error', 'Error al crear cupón', e?.message || 'No se pudo guardar el cupón.');
+    }
+  };
+
+  const handleToggleCoupon = async (id: string, isActive: boolean) => {
+    try {
+      await setCoupons(prev => prev.map(c => c.id === id ? { ...c, isActive } : c));
+      addAuditLog(`${isActive ? 'Activó' : 'Pausó'} cupón ID: ${id}`);
+      triggerToast('info', 'Estado del Cupón Actualizado', `El cupón fue ${isActive ? 'activado' : 'pausado'}.`);
+    } catch (e: any) {
+      triggerToast('error', 'Error al actualizar', e?.message);
+    }
+  };
+
+  const handleDeleteCoupon = async (id: string) => {
+    try {
+      const target = coupons.find(c => c.id === id);
+      await setCoupons(prev => prev.filter(c => c.id !== id));
+      addAuditLog(`Eliminó cupón: ${target?.code || id}`);
+      triggerToast('info', 'Cupón Eliminado', 'El cupón ha sido removido del sistema.');
+    } catch (e: any) {
+      triggerToast('error', 'Error al eliminar', e?.message);
+    }
   };
 
   // --- Simulated SuperAdmin User Staff Handlers ---
@@ -397,19 +659,26 @@ export default function App() {
     price: number;
     category: string;
     stock: number;
+    hidden: boolean;
     image: string;
     options: { title: string; choices: string[]; multiselect: boolean }[];
     extras: { name: string; price: number }[];
+    extrasMultiselect: boolean;
   }>({
     name: '',
     description: '',
     price: 0,
     category: 'Chilaquiles',
     stock: 20,
+    hidden: false,
     image: '',
     options: [],
-    extras: []
+    extras: [],
+    extrasMultiselect: true
   });
+
+  const [isEditCustomCategory, setIsEditCustomCategory] = useState<boolean>(false);
+  const [editCustomCategoryInput, setEditCustomCategoryInput] = useState<string>('');
 
   // State for adding new option/extra in edit modal
   const [newOptionTitle, setNewOptionTitle] = useState('');
@@ -426,10 +695,14 @@ export default function App() {
       price: dish.price,
       category: dish.category || 'Chilaquiles',
       stock: dish.stock,
+      hidden: dish.hidden || false,
       image: dish.image || '',
       options: dish.options ? JSON.parse(JSON.stringify(dish.options)) : [],
-      extras: dish.extras ? JSON.parse(JSON.stringify(dish.extras)) : []
+      extras: dish.extras ? JSON.parse(JSON.stringify(dish.extras)) : [],
+      extrasMultiselect: dish.extrasMultiselect !== undefined ? dish.extrasMultiselect : true
     });
+    setIsEditCustomCategory(false);
+    setEditCustomCategoryInput('');
     setNewOptionTitle('');
     setNewOptionChoices('');
     setNewOptionMultiselect(false);
@@ -440,16 +713,19 @@ export default function App() {
   const handleSaveEditDishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDish) return;
+    const finalCategory = (isEditCustomCategory ? editCustomCategoryInput.trim() : dishForm.category.trim()) || 'General';
     const updated: FoodItem = {
       ...editingDish,
       name: dishForm.name.trim(),
       description: dishForm.description.trim(),
       price: Number(dishForm.price),
-      category: dishForm.category.trim(),
+      category: finalCategory,
       stock: Number(dishForm.stock),
+      hidden: Boolean(dishForm.hidden),
       image: dishForm.image ? dishForm.image.trim() : '',
       options: dishForm.options,
-      extras: dishForm.extras
+      extras: dishForm.extras,
+      extrasMultiselect: dishForm.extrasMultiselect
     };
     handleEditDish(updated);
     setEditingDish(null);
@@ -530,34 +806,64 @@ export default function App() {
     price: 85,
     category: 'Chilaquiles',
     stock: 25,
+    hidden: false,
     image: ''
   });
+  const [isCreateCustomCategory, setIsCreateCustomCategory] = useState<boolean>(false);
+  const [createCustomCategoryInput, setCreateCustomCategoryInput] = useState<string>('');
 
   const handleCreateDishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalCategory = (isCreateCustomCategory ? createCustomCategoryInput.trim() : createForm.category.trim()) || 'General';
     const newDish: FoodItem = {
       id: `f-${Date.now()}`,
       name: createForm.name.trim(),
       description: createForm.description.trim(),
       price: Number(createForm.price),
-      category: createForm.category.trim(),
+      category: finalCategory,
       stock: Number(createForm.stock),
+      hidden: Boolean(createForm.hidden),
       image: createForm.image ? createForm.image.trim() : '',
       order: foodItems.length,
       options: [],
-      extras: []
+      extras: [],
+      extrasMultiselect: true
     };
     handleAddCustomDish(newDish);
     setShowCreateForm(false);
+    setIsCreateCustomCategory(false);
+    setCreateCustomCategoryInput('');
     setCreateForm({
       name: '',
       description: '',
       price: 85,
       category: 'Chilaquiles',
       stock: 25,
+      hidden: false,
       image: ''
     });
   };
+
+  const handleReloadOfficialMenu = () => {
+    setFoodItems(INITIAL_FOOD_ITEMS);
+    setBusinessConfig(prev => ({
+      ...prev,
+      ...DEFAULT_BUSINESS_CONFIG
+    }));
+    addAuditLog('Cargó el menú oficial completo BM Desayunos Cony (21 platillos con fotos).');
+    triggerToast('success', 'Menú Oficial BM Desayunos Cony', 'Se cargaron los 21 platillos con descripciones persuasivas, opciones y fotos.');
+  };
+
+  // Auto-upgrade to BM Desayunos Cony official menu if empty or holding legacy sample items
+  useEffect(() => {
+    if (foodItems && foodItems.length > 0 && foodItems.some(f => f.id === 'f1')) {
+      setFoodItems(INITIAL_FOOD_ITEMS);
+      setBusinessConfig(prev => ({
+        ...prev,
+        ...DEFAULT_BUSINESS_CONFIG
+      }));
+    }
+  }, [foodItems]);
 
   return (
     <div className="min-h-screen bg-[#FAF9F5] text-[#2C241E] flex flex-col font-sans selection:bg-amber-200">
@@ -602,7 +908,27 @@ export default function App() {
           {/* Right Side: Role details or Login trigger */}
           <div className="flex items-center gap-3">
             {userRole !== 'publico' ? (
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2">
+                {/* Quick Button: View Public Menu / Assist Customer without logging out */}
+                <button
+                  onClick={() => setAdminTab(adminTab === 'carta_publica' ? (userRole === 'mensajero' ? 'repartidor' : 'kitchen') : 'carta_publica')}
+                  className={`px-3 py-1.5 rounded-xl border transition-all text-xs font-bold flex items-center gap-1.5 shadow-2xs ${
+                    adminTab === 'carta_publica'
+                      ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-300 shadow-amber-200'
+                      : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+                  }`}
+                  title="Ver Carta Pública para Apoyar al Comensal sin Salir del Perfil"
+                  id="header-carta-publica-btn"
+                >
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">
+                    {adminTab === 'carta_publica' ? '← Volver al Panel' : 'Carta Digital (Asistir)'}
+                  </span>
+                  <span className="sm:hidden">
+                    {adminTab === 'carta_publica' ? 'Panel' : 'Carta'}
+                  </span>
+                </button>
+
                 <div className="text-right hidden sm:block space-y-0.5">
                   <span className="block text-[9px] font-extrabold text-amber-600 uppercase tracking-wider">
                     {activeProfile?.name || userProfiles[userRole as 'superadmin' | 'admin' | 'mensajero']?.name || 'Personal Cony'}
@@ -676,6 +1002,7 @@ export default function App() {
               <ClientMenu
                 foodItems={foodItems}
                 config={businessConfig}
+                coupons={coupons}
                 onPlaceOrder={handlePlaceOrder}
                 triggerToast={triggerToast}
               />
@@ -692,6 +1019,25 @@ export default function App() {
                 </div>
 
                 <nav className="space-y-1.5">
+                  {/* Carta Pública / Asistencia a Comensales - DISPONIBLE PARA TODOS LOS ROLES (SuperAdmin, Admin, Mensajero) */}
+                  <button
+                    onClick={() => setAdminTab('carta_publica')}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                      adminTab === 'carta_publica'
+                        ? 'bg-amber-500 text-white font-extrabold shadow-sm'
+                        : 'text-amber-950 bg-amber-50/70 border border-amber-200/80 hover:bg-amber-100/80 hover:text-amber-900'
+                    }`}
+                    id="tab-carta-publica"
+                  >
+                    <span className="flex items-center gap-2">
+                      <BookOpen className={`w-4 h-4 ${adminTab === 'carta_publica' ? 'text-white' : 'text-amber-700'}`} />
+                      Carta Digital (Apoyar Comensal)
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${adminTab === 'carta_publica' ? 'bg-amber-600 text-white' : 'bg-amber-200 text-amber-900'}`}>
+                      En vivo
+                    </span>
+                  </button>
+
                   {/* Dashboard - Authorized to SuperAdmin & Admin */}
                   {(userRole === 'superadmin' || userRole === 'admin') && (
                     <button
@@ -761,6 +1107,29 @@ export default function App() {
                         <Users className="w-4 h-4 text-amber-600" />
                         Clientes Estrella CRM
                       </span>
+                    </button>
+                  )}
+
+                  {/* Cupones de Descuento - Authorized to SuperAdmin & Admin */}
+                  {(userRole === 'superadmin' || userRole === 'admin') && (
+                    <button
+                      onClick={() => setAdminTab('cupones')}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
+                        adminTab === 'cupones'
+                          ? 'bg-amber-50 text-amber-900 font-extrabold shadow-xs'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                      id="tab-cupones"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Tag className="w-4 h-4 text-amber-600" />
+                        Cupones y Descuentos
+                      </span>
+                      {coupons.filter(c => c.isActive).length > 0 && (
+                        <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                          {coupons.filter(c => c.isActive).length}
+                        </span>
+                      )}
                     </button>
                   )}
 
@@ -834,19 +1203,62 @@ export default function App() {
                   </div>
                   <button
                     onClick={() => {
-                      // handled by firebase auth
-                      triggerToast('info', 'Vista de Comensal', 'Navegando de vuelta a la carta digital pública.');
+                      setAdminTab('carta_publica');
+                      triggerToast('info', 'Carta Digital', 'Visualizando la carta pública para apoyar a los comensales.');
                     }}
-                    className="w-full py-2 bg-amber-500 text-white text-[11px] font-bold rounded-lg hover:bg-amber-600 transition-colors inline-flex items-center justify-center gap-1"
+                    className="w-full py-2 bg-amber-500 text-white text-[11px] font-bold rounded-lg hover:bg-amber-600 transition-colors inline-flex items-center justify-center gap-1.5 shadow-2xs"
                   >
                     <BookOpen className="w-3.5 h-3.5" />
-                    Ir a Carta Pública
+                    Ver Carta Pública (Apoyar Comensal)
                   </button>
                 </div>
               </aside>
 
               {/* ADMIN PANEL WORKSPACE CONTENT */}
               <div className="flex-1 p-6 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full">
+                {/* CARTA PÚBLICA / ASISTENCIA A COMENSALES (ACCESIBLE PARA TODOS LOS ROLES) */}
+                {adminTab === 'carta_publica' && (
+                  <div className="animate-fade-in space-y-4">
+                    {/* Header banner indicating Staff Support Mode */}
+                    <div className="bg-linear-to-r from-amber-500/15 via-orange-500/10 to-amber-50 border border-amber-200/80 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-xs mt-0.5 shrink-0">
+                          <BookOpen className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-serif font-bold text-base text-amber-950">Carta Digital Doña Cony — Modo Apoyo a Comensales</h3>
+                            <span className="text-[10px] font-extrabold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full uppercase">
+                              Sesión activa: {userRole}
+                            </span>
+                          </div>
+                          <p className="text-xs text-amber-900/80 mt-1 max-w-2xl leading-relaxed">
+                            Estás visualizando la carta oficial interactiva con tu sesión activa de <strong className="text-amber-950 font-bold">{activeProfile?.name || 'Personal Doña Cony'}</strong>. Puedes usar esta vista para dictar platillos, revisar fotos, precios e ingredientes en vivo, y levantar pedidos asistiendo directamente al cliente.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setAdminTab(userRole === 'mensajero' ? 'repartidor' : 'kitchen')}
+                          className="px-3.5 py-2 bg-white border border-amber-300 text-amber-950 hover:bg-amber-50 rounded-xl text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
+                        >
+                          <span>Volver a {userRole === 'mensajero' ? 'Repartidor' : 'Operaciones'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ClientMenu Component with full features */}
+                    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs">
+                      <ClientMenu
+                        foodItems={foodItems}
+                        config={businessConfig}
+                        coupons={coupons}
+                        onPlaceOrder={handlePlaceOrder}
+                        triggerToast={triggerToast}
+                      />
+                    </div>
+                  </div>
+                )}
                 {adminTab === 'dashboard' && (userRole === 'superadmin' || userRole === 'admin') && (
                   <div className="animate-fade-in">
                     <AdminDashboard
@@ -864,11 +1276,14 @@ export default function App() {
                     <AdminKitchen
                       orders={orders}
                       foodItems={foodItems}
-                      clients={restoClients}
+                      clients={unifiedClients}
                       onUpdateOrderStatus={handleUpdateOrderStatus}
                       onUpdateStock={handleUpdateStock}
                       onAddCustomDish={handleAddCustomDish}
+                      onEditDish={handleOpenEditDish}
+                      onToggleHideDish={handleToggleHideDish}
                       triggerToast={triggerToast}
+                      config={businessConfig}
                     />
                   </div>
                 )}
@@ -891,7 +1306,20 @@ export default function App() {
                 {adminTab === 'clientes' && (userRole === 'superadmin' || userRole === 'admin') && (
                   <div className="animate-fade-in">
                     <AdminClientes
-                      clients={restoClients}
+                      clients={unifiedClients}
+                      coupons={coupons}
+                      triggerToast={triggerToast}
+                    />
+                  </div>
+                )}
+
+                {adminTab === 'cupones' && (userRole === 'superadmin' || userRole === 'admin') && (
+                  <div className="animate-fade-in">
+                    <AdminCupones
+                      coupons={coupons}
+                      onAddCoupon={handleAddCoupon}
+                      onToggleCoupon={handleToggleCoupon}
+                      onDeleteCoupon={handleDeleteCoupon}
                       triggerToast={triggerToast}
                     />
                   </div>
@@ -913,6 +1341,7 @@ export default function App() {
                       onUpdateOrderStatus={handleUpdateOrderStatus}
                       triggerToast={triggerToast}
                       currentRole={userRole}
+                      config={businessConfig}
                     />
                   </div>
                 )}
@@ -928,13 +1357,21 @@ export default function App() {
                         onSubmit={(e) => {
                           e.preventDefault();
                           const target = e.target as any;
+                          const isAllDay = Boolean(is24HoursState);
+                          const startVal = isAllDay ? '00:00' : (scheduleStartState.trim() || '07:30').replace(/\./g, ':');
+                          const endVal = isAllDay ? '24:00' : (scheduleEndState.trim() || '13:30').replace(/\./g, ':');
+
                           handleSaveConfig({
                             whatsappPhone: target.whatsapp.value,
-                            scheduleStart: target.start.value,
-                            scheduleEnd: target.end.value,
-                            isOpenManual: target.openManual.checked,
+                            deliveryPhone: target.deliveryPhone?.value || businessConfig.deliveryPhone || '',
+                            scheduleStart: startVal,
+                            scheduleEnd: endVal,
+                            isOpenManual: isOpenManualState,
+                            is24Hours: isAllDay,
                             ticketFooter: target.footer.value,
                             deliveryFee: Number(target.fee.value),
+                            suggestedTip: Number(target.suggestedTip?.value ?? 10),
+                            defaultOpeningStock: Number(target.defaultOpeningStock?.value ?? 25),
                             brandLogo: target.brandLogo ? target.brandLogo.value : businessConfig.brandLogo,
                             businessName: target.businessName.value,
                             slogan: target.slogan.value,
@@ -1038,10 +1475,29 @@ export default function App() {
                         </div>
 
                         <div>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                            <span>Móvil / WhatsApp del Mensajero *</span>
+                            <span className="text-[10px] text-amber-800 font-bold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                              🛵 Avisos al Móvil
+                            </span>
+                          </label>
+                          <input
+                            type="text"
+                            name="deliveryPhone"
+                            defaultValue={businessConfig.deliveryPhone || '525598765432'}
+                            placeholder="Ej. 525598765432 (Con código de país)"
+                            className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                          />
+                          <p className="text-[9px] text-gray-400 mt-1">Número móvil donde el mensajero recibirá avisos por WhatsApp de pedidos listos para entregar.</p>
+                        </div>
+
+                        <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Costo de Envío a Domicilio ($ MXN) *</label>
                           <input
                             type="number"
                             name="fee"
+                            min="0"
+                            step="1"
                             defaultValue={businessConfig.deliveryFee}
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             required
@@ -1049,27 +1505,180 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Apertura (Horario de Inicio) *</label>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                            <span>Propuesta de Propina ($ MXN) *</span>
+                            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Configurable por Dueño
+                            </span>
+                          </label>
                           <input
-                            type="text"
-                            name="start"
-                            defaultValue={businessConfig.scheduleStart}
-                            placeholder="Ej. 07:30"
+                            type="number"
+                            name="suggestedTip"
+                            min="0"
+                            step="1"
+                            defaultValue={businessConfig.suggestedTip !== undefined ? businessConfig.suggestedTip : 10}
+                            placeholder="Ej. 10 (Sugerencia por pedido)"
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             required
                           />
+                          <p className="text-[9px] text-gray-400 mt-1">Monto de propina sugerido al comensal en la comanda (pon $0 si no deseas sugerir).</p>
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-gray-600 mb-1">Cierre (Horario de Término) *</label>
+                          <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                            <span>Porciones de Apertura por Platillo (Stock Inicial) *</span>
+                            <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                              Configurable por Dueño
+                            </span>
+                          </label>
                           <input
-                            type="text"
-                            name="end"
-                            defaultValue={businessConfig.scheduleEnd}
-                            placeholder="Ej. 13:30"
+                            type="number"
+                            name="defaultOpeningStock"
+                            min="1"
+                            step="1"
+                            defaultValue={businessConfig.defaultOpeningStock !== undefined ? businessConfig.defaultOpeningStock : 25}
+                            placeholder="Ej. 25 (Porciones al iniciar el día)"
                             className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             required
                           />
+                          <p className="text-[9px] text-gray-400 mt-1">
+                            Cantidad de porciones con las que abre cada platillo en cocina al iniciar el turno o al aplicar la acción de apertura.
+                          </p>
+                        </div>
+
+                        {/* ESTADO OPERATIVO DEL COMAL (ABIERTO / CERRADO) */}
+                        <div className="md:col-span-2 p-4 rounded-2xl border bg-gray-50/80 border-gray-200 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <label className="block text-xs font-bold text-amber-950">
+                                Estado Operativo del Establecimiento
+                              </label>
+                              <p className="text-[11px] text-gray-500">
+                                Controla si la cocina y el carrito de pedidos están disponibles para los comensales.
+                              </p>
+                            </div>
+                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                              isOpenManualState ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              <span className={`w-2 h-2 rounded-full ${isOpenManualState ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                              {isOpenManualState ? 'Comal Abierto (Recibiendo pedidos)' : 'Comal Pausado (Cerrado temporal)'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                            {/* Botón Abierto */}
+                            <button
+                              type="button"
+                              onClick={() => setIsOpenManualState(true)}
+                              className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                                isOpenManualState
+                                  ? 'bg-emerald-50/90 border-emerald-400 ring-2 ring-emerald-200 text-emerald-950 shadow-xs'
+                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className={`p-2 rounded-lg shrink-0 ${isOpenManualState ? 'bg-emerald-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                <CheckCircle className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <span className="block text-xs font-bold text-gray-900">🟢 Tienda Abierta (Activa)</span>
+                                <span className="text-[11px] text-gray-500 leading-snug block mt-0.5">
+                                  El comal recibe pedidos normalmente y el carrito está habilitado.
+                                </span>
+                              </div>
+                            </button>
+
+                            {/* Botón Cerrado */}
+                            <button
+                              type="button"
+                              onClick={() => setIsOpenManualState(false)}
+                              className={`p-3.5 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                                !isOpenManualState
+                                  ? 'bg-rose-50/90 border-rose-400 ring-2 ring-rose-200 text-rose-950 shadow-xs'
+                                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className={`p-2 rounded-lg shrink-0 ${!isOpenManualState ? 'bg-rose-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                <AlertTriangle className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <span className="block text-xs font-bold text-gray-900">🔴 Tienda Cerrada (Pausar)</span>
+                                <span className="text-[11px] text-gray-500 leading-snug block mt-0.5">
+                                  El comal descansa temporalmente. La carta solo será informativa.
+                                </span>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* HORARIO DE SERVICIO */}
+                        <div className="md:col-span-2 p-4 rounded-2xl border bg-amber-50/40 border-amber-200/80 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <label className="block text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                                <Clock className="w-4 h-4 text-amber-600" />
+                                Horario de Atención al Público
+                              </label>
+                              <p className="text-[11px] text-gray-500">
+                                Define el horario de servicio o activa el modo continuo de todo el día (24 Horas).
+                              </p>
+                            </div>
+
+                            {/* Checkbox Abierto 24 Horas */}
+                            <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-amber-200 shadow-2xs hover:bg-amber-50/50">
+                              <input
+                                type="checkbox"
+                                checked={is24HoursState}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  setIs24HoursState(checked);
+                                  if (!checked) {
+                                    if (scheduleStartState === '00:00') setScheduleStartState('07:30');
+                                    if (scheduleEndState === '24:00' || scheduleEndState === '23:59') setScheduleEndState('13:30');
+                                  }
+                                }}
+                                className="w-4 h-4 accent-amber-500 rounded"
+                              />
+                              <span className="text-xs font-bold text-amber-950">☀️ Abierto Todo el Día (24 Horas)</span>
+                            </label>
+                          </div>
+
+                          {!is24HoursState ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">Apertura (Horario de Inicio) *</label>
+                                <input
+                                  type="text"
+                                  name="start"
+                                  value={scheduleStartState}
+                                  onChange={(e) => setScheduleStartState(e.target.value)}
+                                  placeholder="Ej. 07:30 (Formato 24 hrs)"
+                                  className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden font-mono"
+                                  required
+                                />
+                                <p className="text-[10px] text-gray-400 mt-1">Hora en que inicia la atención (ej. 07:30).</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-700 mb-1">Cierre (Horario de Término) *</label>
+                                <input
+                                  type="text"
+                                  name="end"
+                                  value={scheduleEndState}
+                                  onChange={(e) => setScheduleEndState(e.target.value)}
+                                  placeholder="Ej. 13:30 (Formato 24 hrs)"
+                                  className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden font-mono"
+                                  required
+                                />
+                                <p className="text-[10px] text-gray-400 mt-1">Hora en que finalizan los pedidos (ej. 13:30 o 24:00).</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-3 bg-white rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+                              <span className="text-base">✨</span>
+                              <span>
+                                <strong>Modo 24 Horas Activo:</strong> El negocio está configurado para operar todo el día en horario corrido. En la carta se mostrará como <em>"Abierto las 24 Horas (Todo el día)"</em> y los comensales podrán pedir siempre.
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="md:col-span-2">
@@ -1122,19 +1731,6 @@ export default function App() {
                               <p className="text-[9.5px] text-gray-400 mt-1">Los cambios se reflejarán en toda la aplicación al guardar.</p>
                             )}
                           </div>
-                        </div>
-
-                        <div className="md:col-span-2 flex items-center gap-2 py-2">
-                          <input
-                            type="checkbox"
-                            id="openManual"
-                            name="openManual"
-                            defaultChecked={businessConfig.isOpenManual}
-                            className="w-4 h-4 accent-amber-500"
-                          />
-                          <label htmlFor="openManual" className="text-xs font-bold text-amber-950">
-                            Tienda Habilitada (Interruptor Manual Abierto / Cerrado)
-                          </label>
                         </div>
 
                         <div className="md:col-span-2 pt-2 flex justify-end">
@@ -1227,6 +1823,7 @@ export default function App() {
                         </div>
                       </div>
                     )}
+
                   </div>
                 )}
                 {adminTab === 'menu' && (userRole === 'superadmin' || userRole === 'admin') && (
@@ -1238,13 +1835,24 @@ export default function App() {
                           <h3 className="font-serif font-bold text-base text-amber-950">Catálogo de Alimentos</h3>
                           <p className="text-xs text-gray-500">Administra precios, descripciones, categorías e inventario diario del comal.</p>
                         </div>
-                        <button
-                          onClick={() => setShowCreateForm(!showCreateForm)}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          {showCreateForm ? 'Cerrar Registro' : 'Alta de Platillo'}
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={handleReloadOfficialMenu}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                            title="Restaura o sincroniza los 21 platillos oficiales de BM Desayunos Cony con fotos y precios"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Cargar Menú Oficial BM Cony
+                          </button>
+                          <button
+                            onClick={() => setShowCreateForm(!showCreateForm)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {showCreateForm ? 'Cerrar Registro' : 'Alta de Platillo'}
+                          </button>
+                        </div>
                       </div>
 
                       {/* CREATE DISH FORM */}
@@ -1262,17 +1870,51 @@ export default function App() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Categoría *</label>
-                            <select
-                              value={createForm.category}
-                              onChange={e => setCreateForm({...createForm, category: e.target.value})}
-                              className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none"
-                            >
-                              <option value="Chilaquiles">Chilaquiles</option>
-                              <option value="Huevos">Huevos</option>
-                              <option value="Antojitos">Antojitos</option>
-                              <option value="Bebidas">Bebidas</option>
-                            </select>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-xs font-semibold text-gray-600">Categoría *</label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsCreateCustomCategory(!isCreateCustomCategory);
+                                  if (!isCreateCustomCategory) {
+                                    setCreateCustomCategoryInput('');
+                                  }
+                                }}
+                                className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 underline cursor-pointer"
+                              >
+                                {isCreateCustomCategory ? '← Lista existente' : '+ Personalizar'}
+                              </button>
+                            </div>
+
+                            {isCreateCustomCategory ? (
+                              <input
+                                type="text"
+                                required
+                                placeholder="Escribe nueva categoría..."
+                                value={createCustomCategoryInput}
+                                onChange={e => setCreateCustomCategoryInput(e.target.value)}
+                                className="w-full p-2 bg-emerald-50/40 border border-emerald-300 rounded-lg text-xs font-bold text-gray-800 focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
+                                autoFocus
+                              />
+                            ) : (
+                              <select
+                                value={createForm.category}
+                                onChange={e => {
+                                  if (e.target.value === '__NEW__') {
+                                    setIsCreateCustomCategory(true);
+                                    setCreateCustomCategoryInput('');
+                                  } else {
+                                    setCreateForm({...createForm, category: e.target.value});
+                                  }
+                                }}
+                                className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none cursor-pointer"
+                              >
+                                {Array.from(new Set(['Chilaquiles', 'Huevos', 'Antojitos', 'Bebidas', ...foodItems.map(f => f.category)].filter(Boolean))).map(cat => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                                <option value="__NEW__" className="font-bold text-emerald-700">+ Otra categoría personalizada...</option>
+                              </select>
+                            )}
                           </div>
                           <div>
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Precio Unitario ($ MXN) *</label>
@@ -1285,14 +1927,24 @@ export default function App() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs font-semibold text-gray-600 mb-1">Porciones en Inventario *</label>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                              <span>Porciones en Inventario *</span>
+                              <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                Apertura: {businessConfig.defaultOpeningStock || 25}
+                              </span>
+                            </label>
                             <input
                               type="number"
+                              min="0"
+                              step="1"
                               value={createForm.stock}
-                              onChange={e => setCreateForm({...createForm, stock: Number(e.target.value)})}
+                              onChange={e => setCreateForm({...createForm, stock: Math.max(0, Number(e.target.value) || 0)})}
                               required
-                              className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-emerald-500"
+                              className="w-full p-2.5 bg-white border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-emerald-500 focus:outline-hidden"
                             />
+                            <p className="text-[9px] text-gray-400 mt-1">
+                              Porciones iniciales disponibles para la venta (predeterminado de apertura: {businessConfig.defaultOpeningStock || 25}).
+                            </p>
                           </div>
                           <div className="md:col-span-3">
                             <label className="block text-xs font-semibold text-gray-600 mb-1">Imagen del Platillo (Opcional)</label>
@@ -1341,6 +1993,32 @@ export default function App() {
                               className="w-full p-2 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none"
                             />
                           </div>
+                          <div className="md:col-span-3 bg-white border border-gray-200 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs">
+                            <div className="flex items-start gap-2.5">
+                              <div className={`p-2 rounded-lg ${createForm.hidden ? 'bg-amber-100 text-amber-900' : 'bg-emerald-50 text-emerald-800'}`}>
+                                {createForm.hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold text-gray-900 block">
+                                  Ocultar platillo del menú para comensales
+                                </span>
+                                <p className="text-[10px] text-gray-500">
+                                  {createForm.hidden
+                                    ? 'Oculto: Los comensales NO verán este platillo en el menú digital (solo visible en cocina y caja).'
+                                    : 'Visible: Los clientes podrán consultar y ordenar este platillo en el menú digital.'}
+                                </p>
+                              </div>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={createForm.hidden}
+                                onChange={e => setCreateForm({...createForm, hidden: e.target.checked})}
+                                className="sr-only peer"
+                              />
+                              <div className="w-10 h-5 bg-gray-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </label>
+                          </div>
                           <div className="md:col-span-3 flex justify-end">
                             <button
                               type="submit"
@@ -1350,325 +2028,6 @@ export default function App() {
                             </button>
                           </div>
                         </form>
-                      )}
-
-                      {/* EDIT MODAL DIALOG */}
-                      {editingDish && (
-                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-                          <form onSubmit={handleSaveEditDishSubmit} className="bg-white rounded-2xl p-6 max-w-lg w-full border border-gray-200 shadow-2xl space-y-4 my-8">
-                            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-                              <h4 className="font-serif font-bold text-base text-amber-950">
-                                Editar Platillo: {editingDish.name}
-                              </h4>
-                              <button
-                                type="button"
-                                onClick={() => setEditingDish(null)}
-                                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
-                            </div>
-                            
-                            {/* Nombre y Categoría */}
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                              <div className="sm:col-span-2">
-                                <label className="block text-xs font-semibold text-gray-600 mb-1">Nombre del Platillo *</label>
-                                <input
-                                  type="text"
-                                  value={dishForm.name}
-                                  onChange={e => setDishForm({...dishForm, name: e.target.value})}
-                                  required
-                                  className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-600 mb-1">Categoría *</label>
-                                <select
-                                  value={dishForm.category}
-                                  onChange={e => setDishForm({...dishForm, category: e.target.value})}
-                                  className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                                >
-                                  <option value="Chilaquiles">Chilaquiles</option>
-                                  <option value="Huevos">Huevos</option>
-                                  <option value="Antojitos">Antojitos</option>
-                                  <option value="Bebidas">Bebidas</option>
-                                  {/* Include any extra categories if present */}
-                                  {Array.from(new Set(foodItems.map(f => f.category)))
-                                    .filter(c => !['Chilaquiles', 'Huevos', 'Antojitos', 'Bebidas'].includes(c))
-                                    .map(cat => (
-                                      <option key={cat} value={cat}>{cat}</option>
-                                    ))}
-                                </select>
-                              </div>
-                            </div>
-
-                            {/* Precio y Stock */}
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-600 mb-1">Precio ($ MXN) *</label>
-                                <input
-                                  type="number"
-                                  step="0.5"
-                                  value={dishForm.price}
-                                  onChange={e => setDishForm({...dishForm, price: Number(e.target.value)})}
-                                  required
-                                  className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-600 mb-1">Stock Diario (Porciones) *</label>
-                                <input
-                                  type="number"
-                                  value={dishForm.stock}
-                                  onChange={e => setDishForm({...dishForm, stock: Number(e.target.value)})}
-                                  required
-                                  className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                                />
-                              </div>
-                            </div>
-
-                            {/* Descripción */}
-                            <div>
-                              <label className="block text-xs font-semibold text-gray-600 mb-1">Descripción del Platillo *</label>
-                              <textarea
-                                value={dishForm.description}
-                                onChange={e => setDishForm({...dishForm, description: e.target.value})}
-                                required
-                                rows={2}
-                                className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                              />
-                            </div>
-                            
-                            {/* Fotografía / Imagen con previsualización */}
-                            <div className="p-3 bg-amber-50/40 border border-amber-100 rounded-xl space-y-2.5">
-                              <label className="block text-xs font-bold text-amber-950">Foto del Platillo</label>
-                              
-                              <div className="flex items-center gap-3">
-                                {dishForm.image && dishForm.image.trim() !== '' ? (
-                                  <div className="relative group">
-                                    <img
-                                      src={dishForm.image}
-                                      alt="Previsualización"
-                                      className="w-16 h-16 rounded-xl object-cover border border-amber-200 shadow-sm"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => setDishForm({...dishForm, image: ''})}
-                                      className="absolute -top-1.5 -right-1.5 p-1 bg-rose-600 text-white rounded-full shadow-md hover:bg-rose-700 transition-colors"
-                                      title="Quitar foto (dejar solo texto)"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-16 h-16 rounded-xl bg-amber-100 text-amber-900 border border-amber-300 font-black text-base flex items-center justify-center uppercase tracking-wider select-none shadow-sm">
-                                      {getDishInitials(dishForm.name)}
-                                    </div>
-                                    <div className="text-[11px] text-gray-500">
-                                      <strong className="text-amber-900">Sin foto asignada.</strong>
-                                      <p>En el menú público solo se mostrará el texto con precio y descripción.</p>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {dishForm.image && dishForm.image.trim() !== '' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setDishForm({...dishForm, image: ''})}
-                                    className="text-xs text-rose-600 hover:text-rose-700 font-bold underline"
-                                  >
-                                    Eliminar foto
-                                  </button>
-                                )}
-                              </div>
-
-                              <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                                <div className="flex-1">
-                                  <span className="block text-[10px] font-bold text-amber-900 mb-1">📸 Subir / Reemplazar Foto</span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={async (e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        try {
-                                          const base64String = await resizeImage(file, 400, 400);
-                                          setDishForm({...dishForm, image: base64String});
-                                          triggerToast('success', 'Foto Cargada', 'La imagen está lista para guardarse.');
-                                        } catch (err) {
-                                          triggerToast('error', 'Error', 'No se pudo leer la imagen.');
-                                        }
-                                      }
-                                    }}
-                                    className="block w-full text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
-                                  />
-                                </div>
-                                <div className="flex-1">
-                                  <span className="block text-[10px] font-bold text-gray-600 mb-1">🔗 O Pegar Enlace (URL)</span>
-                                  <input
-                                    type="text"
-                                    value={dishForm.image || ''}
-                                    onChange={e => setDishForm({...dishForm, image: e.target.value})}
-                                    placeholder="Ej. https://images..."
-                                    className="w-full p-1.5 bg-white border border-gray-200 rounded-lg text-xs"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Opciones y Modificadores */}
-                            <div className="border border-gray-100 rounded-xl p-3 bg-gray-50/50 space-y-2">
-                              <span className="block text-xs font-bold text-gray-700">Opciones de Preparación</span>
-                              {dishForm.options && dishForm.options.length > 0 ? (
-                                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                                  {dishForm.options.map((opt, oIdx) => (
-                                    <div key={oIdx} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200 text-xs">
-                                      <div>
-                                        <strong className="text-amber-950">{opt.title}</strong>
-                                        <span className="text-[10px] text-gray-500 block">
-                                          {opt.choices.join(', ')} ({opt.multiselect ? 'Múltiple' : 'Única'})
-                                        </span>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const next = dishForm.options.filter((_, idx) => idx !== oIdx);
-                                          setDishForm({...dishForm, options: next});
-                                        }}
-                                        className="text-rose-500 hover:text-rose-700 p-1"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-[11px] text-gray-400">Sin opciones configuradas.</p>
-                              )}
-
-                              {/* Add Option Subform */}
-                              <div className="pt-2 border-t border-gray-200/60 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <input
-                                  type="text"
-                                  placeholder="Título (Ej. Salsa, Término)"
-                                  value={newOptionTitle}
-                                  onChange={e => setNewOptionTitle(e.target.value)}
-                                  className="p-1.5 bg-white border border-gray-200 rounded text-[11px]"
-                                />
-                                <input
-                                  type="text"
-                                  placeholder="Opciones (Ej. Verde, Roja, Pasilla)"
-                                  value={newOptionChoices}
-                                  onChange={e => setNewOptionChoices(e.target.value)}
-                                  className="p-1.5 bg-white border border-gray-200 rounded text-[11px]"
-                                />
-                                <div className="sm:col-span-2 flex items-center justify-between">
-                                  <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
-                                    <input
-                                      type="checkbox"
-                                      checked={newOptionMultiselect}
-                                      onChange={e => setNewOptionMultiselect(e.target.checked)}
-                                      className="w-3.5 h-3.5 accent-amber-500"
-                                    />
-                                    Permitir selección múltiple
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (!newOptionTitle.trim() || !newOptionChoices.trim()) return;
-                                      const choices = newOptionChoices.split(',').map(c => c.trim()).filter(Boolean);
-                                      const updated = [...dishForm.options, { title: newOptionTitle.trim(), choices, multiselect: newOptionMultiselect }];
-                                      setDishForm({...dishForm, options: updated});
-                                      setNewOptionTitle('');
-                                      setNewOptionChoices('');
-                                      setNewOptionMultiselect(false);
-                                    }}
-                                    className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold"
-                                  >
-                                    + Añadir Opción
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Extras Adicionales */}
-                            <div className="border border-gray-100 rounded-xl p-3 bg-gray-50/50 space-y-2">
-                              <span className="block text-xs font-bold text-gray-700">Extras Adicionales</span>
-                              {dishForm.extras && dishForm.extras.length > 0 ? (
-                                <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                                  {dishForm.extras.map((ext, eIdx) => (
-                                    <div key={eIdx} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200 text-xs">
-                                      <span className="text-amber-950 font-medium">
-                                        {ext.name} <strong className="text-amber-600">+${ext.price}</strong>
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const next = dishForm.extras.filter((_, idx) => idx !== eIdx);
-                                          setDishForm({...dishForm, extras: next});
-                                        }}
-                                        className="text-rose-500 hover:text-rose-700 p-1"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-[11px] text-gray-400">Sin extras configurados.</p>
-                              )}
-
-                              {/* Add Extra Subform */}
-                              <div className="pt-2 border-t border-gray-200/60 flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  placeholder="Nombre (Ej. Pollo extra)"
-                                  value={newExtraName}
-                                  onChange={e => setNewExtraName(e.target.value)}
-                                  className="flex-1 p-1.5 bg-white border border-gray-200 rounded text-[11px]"
-                                />
-                                <input
-                                  type="number"
-                                  placeholder="$ MXN"
-                                  value={newExtraPrice}
-                                  onChange={e => setNewExtraPrice(Number(e.target.value))}
-                                  className="w-20 p-1.5 bg-white border border-gray-200 rounded text-[11px]"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!newExtraName.trim()) return;
-                                    const updated = [...dishForm.extras, { name: newExtraName.trim(), price: Number(newExtraPrice) || 0 }];
-                                    setDishForm({...dishForm, extras: updated});
-                                    setNewExtraName('');
-                                    setNewExtraPrice(15);
-                                  }}
-                                  className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold shrink-0"
-                                >
-                                  + Añadir Extra
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
-                              <button
-                                type="button"
-                                onClick={() => setEditingDish(null)}
-                                className="px-3.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-500 hover:bg-gray-50"
-                              >
-                                Cancelar
-                              </button>
-                              <button
-                                type="submit"
-                                className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-sm"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                Guardar Todos los Cambios
-                              </button>
-                            </div>
-                          </form>
-                        </div>
                       )}
 
                       {/* Dishes List with Drag & Drop Sorting */}
@@ -1732,8 +2091,14 @@ export default function App() {
                               )}
 
                               <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <h5 className="font-serif font-bold text-sm text-amber-950">{item.name}</h5>
+                                  {item.hidden && (
+                                    <span className="text-[9.5px] font-bold px-2 py-0.5 rounded bg-gray-200 text-gray-700 border border-gray-300 inline-flex items-center gap-1">
+                                      <EyeOff className="w-3 h-3 text-gray-500" />
+                                      Oculto en menú
+                                    </span>
+                                  )}
                                   {(!item.image || item.image.trim() === '') && (
                                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
                                       Sin foto
@@ -1741,14 +2106,28 @@ export default function App() {
                                   )}
                                 </div>
                                 <p className="text-[11px] text-gray-400 font-semibold">{item.category}</p>
-                                <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold mt-1 text-gray-600">
-                                  <span>Precio: <strong className="text-amber-600">${item.price.toFixed(2)}</strong></span>
-                                  <span>Insumo: <strong className={item.stock > 0 ? "text-emerald-600" : "text-rose-600"}>{item.stock} pzas</strong></span>
+                                <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-bold mt-1.5 text-gray-600">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditDish(item)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300/80 transition-all cursor-pointer shadow-2xs hover:scale-102"
+                                    title="Clic para editar precio o detalles"
+                                  >
+                                    <DollarSign className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>Precio:</span>
+                                    <strong className="text-amber-800 text-xs font-black">${item.price.toFixed(2)}</strong>
+                                    <Edit2 className="w-3 h-3 text-amber-600 ml-0.5" />
+                                  </button>
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-50 border border-gray-200">
+                                    Insumo: <strong className={item.stock > 0 ? "text-emerald-600" : "text-rose-600"}>{item.stock} pzas</strong>
+                                  </span>
                                   {item.options && item.options.length > 0 && (
                                     <span className="text-gray-400 font-normal">({item.options.length} opciones)</span>
                                   )}
                                   {item.extras && item.extras.length > 0 && (
-                                    <span className="text-gray-400 font-normal">({item.extras.length} extras)</span>
+                                    <span className="text-gray-500 font-normal">
+                                      ({item.extras.length} extras · {item.extrasMultiselect !== false ? 'Múltiple' : 'Única'})
+                                    </span>
                                   )}
                                 </div>
                               </div>
@@ -1777,6 +2156,19 @@ export default function App() {
                                   <ChevronDown className="w-3.5 h-3.5" />
                                 </button>
                               </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleToggleHideDish(item.id)}
+                                className={`p-2 border rounded-xl transition-colors cursor-pointer ${
+                                  item.hidden
+                                    ? 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                }`}
+                                title={item.hidden ? "Oculto en menú comensal. Clic para mostrar." : "Visible en menú comensal. Clic para ocultar."}
+                              >
+                                {item.hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </button>
 
                               <button
                                 type="button"
@@ -2010,6 +2402,526 @@ export default function App() {
           Desarrollado de manera responsiva para PC, tablets y dispositivos móviles inteligentes.
         </p>
       </footer>
+
+      {/* EDIT DISH MODAL DIALOG (GLOBAL FOR KITCHEN & MENU CONFIG) */}
+      {editingDish && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4 overflow-hidden">
+          <form
+            onSubmit={handleSaveEditDishSubmit}
+            className="bg-white rounded-2xl max-w-xl w-full border border-gray-200 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-fade-in"
+          >
+            {/* STICKY HEADER */}
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-gray-150 bg-white shrink-0">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-amber-100 text-amber-800 rounded-xl">
+                  <Edit2 className="w-4 h-4" />
+                </span>
+                <div>
+                  <h4 className="font-serif font-bold text-base text-amber-950 leading-tight">
+                    Editar Platillo: {dishForm.name || editingDish.name}
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Modifica el precio, inventario, descripción, foto y opciones.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingDish(null)}
+                className="p-1.5 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                title="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* SCROLLABLE BODY */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1 overscroll-contain">
+              {/* SECCIÓN DESTACADA: PRECIO Y STOCK */}
+              <div className="p-4 bg-gradient-to-br from-amber-50 via-orange-50/50 to-amber-100/40 border-2 border-amber-300 rounded-2xl shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-amber-500 text-white rounded-lg shadow-2xs">
+                      <DollarSign className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h5 className="text-xs font-black text-amber-950 uppercase tracking-wider">Precio de Venta al Público *</h5>
+                      <p className="text-[10px] text-amber-900/70">Precio visible en el menú digital y en caja.</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-black text-amber-800 bg-amber-200/80 px-2.5 py-1 rounded-full border border-amber-300 font-mono">
+                    ${Number(dishForm.price || 0).toFixed(2)} MXN
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-950 mb-1">
+                      Precio en Efectivo / Digital ($ MXN) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-amber-800 font-black text-lg select-none">$</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={dishForm.price === 0 ? '' : dishForm.price}
+                        onChange={e => setDishForm({...dishForm, price: e.target.value === '' ? 0 : Number(e.target.value)})}
+                        placeholder="0.00"
+                        required
+                        className="w-full pl-8 pr-3 py-2.5 bg-white border-2 border-amber-400 focus:border-amber-600 rounded-xl text-lg font-black text-amber-950 focus:ring-2 focus:ring-amber-200 focus:outline-hidden shadow-xs"
+                      />
+                    </div>
+                    {/* Botones de ajuste rápido */}
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-gray-500 font-semibold">Ajustes:</span>
+                      <button
+                        type="button"
+                        onClick={() => setDishForm({...dishForm, price: Math.max(0, (dishForm.price || 0) - 5)})}
+                        className="px-2 py-0.5 bg-white hover:bg-amber-100 border border-amber-300 rounded text-[10px] font-bold text-amber-900 transition-colors cursor-pointer"
+                        title="Restar $5"
+                      >
+                        -$5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDishForm({...dishForm, price: (dishForm.price || 0) + 5})}
+                        className="px-2 py-0.5 bg-white hover:bg-amber-100 border border-amber-300 rounded text-[10px] font-bold text-amber-900 transition-colors cursor-pointer"
+                        title="Sumar $5"
+                      >
+                        +$5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDishForm({...dishForm, price: (dishForm.price || 0) + 10})}
+                        className="px-2 py-0.5 bg-white hover:bg-amber-100 border border-amber-300 rounded text-[10px] font-bold text-amber-900 transition-colors cursor-pointer"
+                        title="Sumar $10"
+                      >
+                        +$10
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-950 mb-1 flex items-center justify-between">
+                      <span>Stock Diario (Porciones) *</span>
+                      <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                        {dishForm.stock > 0 ? `${dishForm.stock} disponibles` : 'Agotado'}
+                      </span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={dishForm.stock}
+                      onChange={e => setDishForm({...dishForm, stock: Math.max(0, Number(e.target.value) || 0)})}
+                      required
+                      className="w-full p-2.5 bg-white border border-gray-300 focus:border-amber-500 rounded-xl text-base font-bold text-gray-900 focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-2">Porciones disponibles actualmente en el comal.</p>
+                  </div>
+                </div>
+              </div>
+            
+              {/* Nombre y Categoría */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Nombre del Platillo *</label>
+                  <input
+                    type="text"
+                    value={dishForm.name}
+                    onChange={e => setDishForm({...dishForm, name: e.target.value})}
+                    required
+                    className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-gray-600">Categoría *</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditCustomCategory(!isEditCustomCategory);
+                        if (!isEditCustomCategory) {
+                          setEditCustomCategoryInput('');
+                        }
+                      }}
+                      className="text-[10px] font-bold text-amber-600 hover:text-amber-800 underline cursor-pointer"
+                    >
+                      {isEditCustomCategory ? '← Existente' : '+ Personalizar'}
+                    </button>
+                  </div>
+
+                  {isEditCustomCategory ? (
+                    <input
+                      type="text"
+                      required
+                      placeholder="Escribe categoría..."
+                      value={editCustomCategoryInput}
+                      onChange={e => setEditCustomCategoryInput(e.target.value)}
+                      className="w-full p-2 border border-amber-400 bg-amber-50/40 rounded-lg text-xs font-bold text-gray-800 focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                      autoFocus
+                    />
+                  ) : (
+                    <select
+                      value={dishForm.category}
+                      onChange={e => {
+                        if (e.target.value === '__NEW__') {
+                          setIsEditCustomCategory(true);
+                          setEditCustomCategoryInput('');
+                        } else {
+                          setDishForm({...dishForm, category: e.target.value});
+                        }
+                      }}
+                      className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none bg-white cursor-pointer"
+                    >
+                      {Array.from(new Set(['Desayunos', 'Antojitos', 'Tortas y Sándwiches', 'Bebidas', 'Para Endulzar el Día', ...foodItems.map(f => f.category)].filter(Boolean))).map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                      <option value="__NEW__" className="font-bold text-amber-600">+ Otra categoría personalizada...</option>
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Descripción */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Descripción del Platillo (Copy Gastronómico) *</label>
+                <textarea
+                  value={dishForm.description}
+                  onChange={e => setDishForm({...dishForm, description: e.target.value})}
+                  required
+                  rows={2}
+                  className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+            
+              {/* Fotografía / Imagen con previsualización */}
+              <div className="p-3 bg-amber-50/40 border border-amber-100 rounded-xl space-y-2.5">
+                <label className="block text-xs font-bold text-amber-950">Foto del Platillo</label>
+                
+                <div className="flex items-center gap-3">
+                  {dishForm.image && dishForm.image.trim() !== '' ? (
+                    <div className="relative group">
+                      <img
+                        src={dishForm.image}
+                        alt="Previsualización"
+                        className="w-16 h-16 rounded-xl object-cover border border-amber-200 shadow-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setDishForm({...dishForm, image: ''})}
+                        className="absolute -top-1.5 -right-1.5 p-1 bg-rose-600 text-white rounded-full shadow-md hover:bg-rose-700 transition-colors"
+                        title="Quitar foto (dejar solo texto)"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-16 rounded-xl bg-amber-100 text-amber-900 border border-amber-300 font-black text-base flex items-center justify-center uppercase tracking-wider select-none shadow-sm">
+                        {getDishInitials(dishForm.name)}
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        <strong className="text-amber-900">Sin foto asignada.</strong>
+                        <p>En el menú público solo se mostrará el texto con precio y descripción.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {dishForm.image && dishForm.image.trim() !== '' && (
+                    <button
+                      type="button"
+                      onClick={() => setDishForm({...dishForm, image: ''})}
+                      className="text-xs text-rose-600 hover:text-rose-700 font-bold underline"
+                    >
+                      Eliminar foto
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <div className="flex-1">
+                    <span className="block text-[10px] font-bold text-amber-900 mb-1">📸 Subir / Reemplazar Foto</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const base64String = await resizeImage(file, 400, 400);
+                            setDishForm({...dishForm, image: base64String});
+                            triggerToast('success', 'Foto Cargada', 'La imagen está lista para guardarse.');
+                          } catch (err) {
+                            triggerToast('error', 'Error', 'No se pudo leer la imagen.');
+                          }
+                        }
+                      }}
+                      className="block w-full text-[10px] text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <span className="block text-[10px] font-bold text-gray-600 mb-1">🔗 O Pegar Enlace (URL)</span>
+                    <input
+                      type="text"
+                      value={dishForm.image || ''}
+                      onChange={e => setDishForm({...dishForm, image: e.target.value})}
+                      placeholder="Ej. https://images..."
+                      className="w-full p-1.5 bg-white border border-gray-200 rounded-lg text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Opciones y Modificadores */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50/50 space-y-2">
+                <span className="block text-xs font-bold text-gray-700">Opciones de Preparación</span>
+                {dishForm.options && dishForm.options.length > 0 ? (
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {dishForm.options.map((opt, oIdx) => (
+                      <div key={oIdx} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200 text-xs">
+                        <div>
+                          <strong className="text-amber-950">{opt.title}</strong>
+                          <span className="text-[10px] text-gray-500 block">
+                            {opt.choices.join(', ')} ({opt.multiselect ? 'Múltiple' : 'Única'})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = dishForm.options.filter((_, idx) => idx !== oIdx);
+                            setDishForm({...dishForm, options: next});
+                          }}
+                          className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400">Sin opciones configuradas.</p>
+                )}
+
+                {/* Add Option Subform */}
+                <div className="pt-2 border-t border-gray-200/60 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Título (Ej. Salsa, Término)"
+                    value={newOptionTitle}
+                    onChange={e => setNewOptionTitle(e.target.value)}
+                    className="p-1.5 bg-white border border-gray-200 rounded text-[11px]"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Opciones (Ej. Verde, Roja, Pasilla)"
+                    value={newOptionChoices}
+                    onChange={e => setNewOptionChoices(e.target.value)}
+                    className="p-1.5 bg-white border border-gray-200 rounded text-[11px]"
+                  />
+                  <div className="sm:col-span-2 flex items-center justify-between">
+                    <label className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={newOptionMultiselect}
+                        onChange={e => setNewOptionMultiselect(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-amber-500"
+                      />
+                      Permitir selección múltiple
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newOptionTitle.trim() || !newOptionChoices.trim()) return;
+                        const choices = newOptionChoices.split(',').map(c => c.trim()).filter(Boolean);
+                        const updated = [...dishForm.options, { title: newOptionTitle.trim(), choices, multiselect: newOptionMultiselect }];
+                        setDishForm({...dishForm, options: updated});
+                        setNewOptionTitle('');
+                        setNewOptionChoices('');
+                        setNewOptionMultiselect(false);
+                      }}
+                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold cursor-pointer"
+                    >
+                      + Añadir Opción
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Extras Adicionales */}
+              <div className="border border-gray-100 rounded-xl p-3 bg-gray-50/50 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-1 border-b border-gray-200/60">
+                  <div className="flex items-center gap-2">
+                    <span className="block text-xs font-bold text-gray-700">Extras Adicionales</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      dishForm.extrasMultiselect
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-100 text-amber-900 border-amber-300'
+                    }`}>
+                      {dishForm.extrasMultiselect ? 'Múltiple' : 'Única'}
+                    </span>
+                  </div>
+
+                  {/* Selector Múltiple o Única */}
+                  <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-gray-200 text-[10px] font-bold self-start sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setDishForm({...dishForm, extrasMultiselect: false})}
+                      className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                        !dishForm.extrasMultiselect
+                          ? 'bg-amber-500 text-white shadow-2xs'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Única (Máx. 1)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDishForm({...dishForm, extrasMultiselect: true})}
+                      className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                        dishForm.extrasMultiselect
+                          ? 'bg-amber-500 text-white shadow-2xs'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Múltiple (Varios)
+                    </button>
+                  </div>
+                </div>
+
+                {dishForm.extras && dishForm.extras.length > 0 ? (
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                    {dishForm.extras.map((ext, eIdx) => (
+                      <div key={eIdx} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-950 font-medium">{ext.name}</span>
+                          <strong className="text-amber-600">+${ext.price}</strong>
+                          <span className="text-[9.5px] text-gray-500 font-semibold">
+                            ({dishForm.extrasMultiselect ? 'Múltiple' : 'Única'})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = dishForm.extras.filter((_, idx) => idx !== eIdx);
+                            setDishForm({...dishForm, extras: next});
+                          }}
+                          className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400">Sin extras configurados.</p>
+                )}
+
+                {/* Add Extra Subform */}
+                <div className="pt-2 border-t border-gray-200/60 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nombre (Ej. Pollo extra)"
+                      value={newExtraName}
+                      onChange={e => setNewExtraName(e.target.value)}
+                      className="flex-1 p-1.5 bg-white border border-gray-200 rounded text-[11px]"
+                    />
+                    <input
+                      type="number"
+                      placeholder="$ MXN"
+                      value={newExtraPrice}
+                      onChange={e => setNewExtraPrice(Number(e.target.value))}
+                      className="w-20 p-1.5 bg-white border border-gray-200 rounded text-[11px]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newExtraName.trim()) return;
+                        const updated = [...dishForm.extras, { name: newExtraName.trim(), price: Number(newExtraPrice) || 0 }];
+                        setDishForm({...dishForm, extras: updated});
+                        setNewExtraName('');
+                        setNewExtraPrice(15);
+                      }}
+                      className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      + Añadir Extra
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-gray-600">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={dishForm.extrasMultiselect}
+                        onChange={e => setDishForm({...dishForm, extrasMultiselect: e.target.checked})}
+                        className="w-3.5 h-3.5 accent-amber-500 rounded"
+                      />
+                      <span>Permitir selección múltiple de extras</span>
+                    </label>
+                    <span className="text-[10px] text-gray-500 italic">
+                      {dishForm.extrasMultiselect ? 'Comensal puede elegir varios' : 'Comensal solo puede elegir 1'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Opción de Visibilidad: Ocultar del Menú Comensal */}
+              <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-3 flex items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className={`p-2 rounded-lg ${dishForm.hidden ? 'bg-amber-200/80 text-amber-900' : 'bg-emerald-100 text-emerald-800'}`}>
+                    {dishForm.hidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-gray-900 block">
+                      Ocultar platillo del menú para comensales
+                    </span>
+                    <p className="text-[10px] text-gray-500">
+                      {dishForm.hidden
+                        ? 'Oculto: Los comensales NO verán este platillo en el menú digital (solo cocina y caja).'
+                        : 'Visible: Los clientes pueden consultar y pedir este platillo en el menú digital.'}
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(dishForm.hidden)}
+                    onChange={e => setDishForm({...dishForm, hidden: e.target.checked})}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-gray-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                </label>
+              </div>
+            </div>
+
+            {/* STICKY FOOTER */}
+            <div className="px-5 sm:px-6 py-3.5 border-t border-gray-150 bg-gray-50 flex items-center justify-between gap-3 shrink-0 rounded-b-2xl">
+              <div className="text-xs text-gray-600">
+                <span>Precio a guardar: </span>
+                <strong className="text-amber-700 font-black text-sm">${Number(dishForm.price || 0).toFixed(2)} MXN</strong>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDish(null)}
+                  className="px-3.5 py-2 border border-gray-300 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  Guardar Todos los Cambios
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* TOAST SYSTEM CONTAINER */}
       <CommonToast toast={activeToast} onClose={() => setActiveToast(null)} />

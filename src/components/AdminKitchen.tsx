@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { KanbanSquare, CheckCircle, Package, Plus, Star, Volume2, Flame, ArrowRight, Trash2 } from 'lucide-react';
-import { FoodOrder, FoodItem, RestoClient } from '../types';
+import { KanbanSquare, CheckCircle, Package, Plus, Minus, Star, Volume2, Flame, ArrowRight, Trash2, Smartphone, MessageSquare, Eye, EyeOff, Edit3 } from 'lucide-react';
+import { FoodOrder, FoodItem, RestoClient, BusinessConfig } from '../types';
+import { normalizePhone } from '../utils/phoneUtils';
+import { buildMessengerWhatsAppUrl } from '../utils/deliveryNotification';
 
 interface AdminKitchenProps {
   orders: FoodOrder[];
@@ -14,7 +16,10 @@ interface AdminKitchenProps {
   onUpdateOrderStatus: (orderId: string, nextStatus: FoodOrder['status']) => void;
   onUpdateStock: (itemId: string, newStock: number) => void;
   onAddCustomDish: (dish: FoodItem) => void;
+  onEditDish?: (dish: FoodItem) => void;
+  onToggleHideDish?: (itemId: string) => void;
   triggerToast: (type: 'success' | 'error' | 'info', title: string, description?: string) => void;
+  config?: BusinessConfig;
 }
 
 export const AdminKitchen: React.FC<AdminKitchenProps> = ({
@@ -24,18 +29,49 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
   onUpdateOrderStatus,
   onUpdateStock,
   onAddCustomDish,
-  triggerToast
+  onEditDish,
+  onToggleHideDish,
+  triggerToast,
+  config
 }) => {
   const [timeTicker, setTimeTicker] = useState<number>(Date.now());
   const [activeTab, setActiveTab] = useState<'kanban' | 'stock'>('kanban');
+
+  const handleNotifyMessengerWhatsApp = (order: FoodOrder) => {
+    const phone = config?.deliveryPhone || config?.whatsappPhone || '';
+    if (!phone) {
+      triggerToast('error', 'Sin teléfono del mensajero', 'Configura el celular del repartidor en Ajustes del Negocio.');
+      return;
+    }
+    const url = buildMessengerWhatsAppUrl(phone, order, config?.businessName);
+    window.open(url, '_blank');
+    triggerToast('success', 'Aviso Enviado al Móvil', `Abriendo WhatsApp con la comanda #${order.orderNumber} para el mensajero.`);
+  };
+
+  // Configurable opening stock from owner
+  const openingStock = config?.defaultOpeningStock ?? 25;
 
   // Stock creator modal state
   const [showDishModal, setShowDishModal] = useState<boolean>(false);
   const [newDishName, setNewDishName] = useState<string>('');
   const [newDishCategory, setNewDishCategory] = useState<string>('Chilaquiles');
+  const [isCustomCategory, setIsCustomCategory] = useState<boolean>(false);
+  const [customCategoryInput, setCustomCategoryInput] = useState<string>('');
   const [newDishPrice, setNewDishPrice] = useState<number>(85);
-  const [newDishStock, setNewDishStock] = useState<number>(30);
+  const [newDishStock, setNewDishStock] = useState<number>(openingStock);
   const [newDishDesc, setNewDishDesc] = useState<string>('');
+  const [newDishHidden, setNewDishHidden] = useState<boolean>(false);
+
+  // Available categories (default categories + any custom ones found in foodItems)
+  const availableCategories = Array.from(
+    new Set([
+      'Chilaquiles',
+      'Huevos',
+      'Antojitos',
+      'Bebidas',
+      ...foodItems.map(f => f.category).filter(Boolean)
+    ])
+  );
 
   // Auto-refresh timer to calculate SLA coloring every 10 seconds
   useEffect(() => {
@@ -119,18 +155,21 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
 
   const handleCreateDish = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDishName || newDishPrice <= 0 || newDishStock <= 0) {
+    if (!newDishName || newDishPrice <= 0 || newDishStock < 0) {
       triggerToast('error', 'Campos Inválidos', 'Ingresa nombre, precio y porciones válidas.');
       return;
     }
+
+    const finalCategory = (isCustomCategory ? customCategoryInput.trim() : newDishCategory.trim()) || 'General';
 
     const newDish: FoodItem = {
       id: `custom-${Date.now()}`,
       name: newDishName,
       description: newDishDesc || 'Platillo especial preparado al momento con ingredientes frescos.',
       price: Number(newDishPrice),
-      category: newDishCategory,
+      category: finalCategory,
       stock: Number(newDishStock),
+      hidden: newDishHidden,
       image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=600',
       options: [
         { title: 'Acompañamiento', choices: ['Con Cebolla 🧅', 'Sin Cebolla', 'Salsa Aparte 🟢'], multiselect: true }
@@ -141,7 +180,14 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
     setShowDishModal(false);
     setNewDishName('');
     setNewDishDesc('');
-    triggerToast('success', 'Platillo Registrado', `Se agregó ${newDishName} al menú digital.`);
+    setIsCustomCategory(false);
+    setCustomCategoryInput('');
+    setNewDishHidden(false);
+    triggerToast(
+      'success',
+      'Platillo Registrado',
+      `Se agregó "${newDishName}" en la categoría "${finalCategory}"${newDishHidden ? ' (oculto del menú comensal)' : ''}.`
+    );
   };
 
   const receivedOrders = orders.filter(o => o.status === 'recibido');
@@ -210,7 +256,11 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
               ) : (
                 receivedOrders.map(order => {
                   const sla = getSlaDetails(order.createdAt);
-                  const isStar = clients.find(c => c.phone === order.clientPhone)?.tier === 'estrella' || order.isGolden;
+                  const ordPhone = normalizePhone(order.clientPhone);
+                  const isStar = clients.find(c => {
+                    const cPhone = normalizePhone(c.phone);
+                    return ordPhone && cPhone && ordPhone === cPhone && c.tier === 'estrella';
+                  }) !== undefined || order.isGolden;
 
                   return (
                     <div
@@ -314,7 +364,11 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
               ) : (
                 preparingOrders.map(order => {
                   const sla = getSlaDetails(order.createdAt);
-                  const isStar = clients.find(c => c.phone === order.clientPhone)?.tier === 'estrella' || order.isGolden;
+                  const ordPhone = normalizePhone(order.clientPhone);
+                  const isStar = clients.find(c => {
+                    const cPhone = normalizePhone(c.phone);
+                    return ordPhone && cPhone && ordPhone === cPhone && c.tier === 'estrella';
+                  }) !== undefined || order.isGolden;
 
                   return (
                     <div
@@ -375,17 +429,31 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                           Regresar a Nuevas
                         </button>
                         {order.deliveryType === 'domicilio' ? (
-                          <button
-                            onClick={() => onUpdateOrderStatus(order.id, 'listo')}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs"
-                          >
-                            Terminar y Avisar Repartidor
-                            <CheckCircle className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              onClick={() => {
+                                onUpdateOrderStatus(order.id, 'listo');
+                                triggerToast('success', 'Listo en Barra', `La comanda ${order.orderNumber} está lista para el mensajero.`);
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
+                            >
+                              Terminar y Avisar Repartidor
+                              <CheckCircle className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleNotifyMessengerWhatsApp(order)}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
+                              title="Avisar directo al WhatsApp del repartidor"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                              WhatsApp Repartidor
+                            </button>
+                          </div>
                         ) : (
                           <button
                             onClick={() => onUpdateOrderStatus(order.id, 'entregado')}
-                            className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs"
+                            className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
                           >
                             Entregar al Cliente
                             <CheckCircle className="w-3.5 h-3.5" />
@@ -426,10 +494,19 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                       </div>
                       <p className="text-[10px] text-gray-500">Cliente: <strong className="text-gray-700 font-bold">{order.clientName}</strong></p>
                       
-                      <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap justify-end gap-2">
+                      <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap justify-between items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleNotifyMessengerWhatsApp(order)}
+                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1 shadow-xs cursor-pointer"
+                          title="Enviar comanda completa al WhatsApp móvil del mensajero"
+                        >
+                          <Smartphone className="w-3 h-3" />
+                          Avisar a Celular del Mensajero
+                        </button>
                         <button
                           onClick={() => onUpdateOrderStatus(order.id, 'preparando')}
-                          className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold inline-flex items-center shadow-xs transition-colors"
+                          className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-bold inline-flex items-center shadow-xs transition-colors cursor-pointer"
                         >
                           Deshacer (A Comal)
                         </button>
@@ -514,17 +591,42 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
         <div className="bg-white p-6 rounded-2xl border border-gray-200 space-y-6" id="stock-manager-view">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h3 className="font-serif font-bold text-lg text-amber-950">Catálogo de Platillos y Porciones</h3>
-              <p className="text-xs text-gray-500">Disminuye de forma automática las raciones con cada pedido. Configura el stock aquí.</p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-serif font-bold text-lg text-amber-950">Catálogo de Platillos y Porciones</h3>
+                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  Apertura: {openingStock} porc.
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Disminuye de forma automática las raciones con cada pedido. Las porciones de apertura ({openingStock}) son configurables por el dueño en Ajustes del Negocio.
+              </p>
             </div>
             
-            <button
-              onClick={() => setShowDishModal(true)}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1 shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Nuevo Platillo Personalizado
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  foodItems.forEach(fi => onUpdateStock(fi.id, openingStock));
+                  triggerToast('success', 'Apertura de Menú Aplicada', `Se cargaron ${openingStock} porciones de apertura a todo el catálogo.`);
+                }}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                title={`Cargar ${openingStock} porciones a todos los platillos`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                Apertura General ({openingStock} porc.)
+              </button>
+
+              <button
+                onClick={() => {
+                  setNewDishStock(openingStock);
+                  setShowDishModal(true);
+                }}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Nuevo Platillo Personalizado
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto border border-gray-100 rounded-xl">
@@ -534,6 +636,7 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                   <th className="p-4">Platillo</th>
                   <th className="p-4">Categoría</th>
                   <th className="p-4">Precio</th>
+                  <th className="p-4 text-center">Menú Comensal</th>
                   <th className="p-4 text-center">Porciones Disponibles</th>
                   <th className="p-4">Acompañamientos / Salsas</th>
                   <th className="p-4 text-right">Acciones</th>
@@ -541,38 +644,89 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs text-gray-700">
                 {foodItems.map(item => (
-                  <tr key={item.id} className="hover:bg-gray-50/50">
+                  <tr key={item.id} className={`hover:bg-gray-50/50 ${item.hidden ? 'bg-gray-50/40' : ''}`}>
                     <td className="p-4 font-bold text-amber-950 flex items-center gap-2">
                       <img src={item.image} alt="" className="w-10 h-10 rounded-lg object-cover bg-gray-50 border" />
-                      <span>{item.name}</span>
+                      <div className="flex flex-col">
+                        <span>{item.name}</span>
+                        {item.hidden && (
+                          <span className="text-[9.5px] font-bold text-gray-400 flex items-center gap-1">
+                            <EyeOff className="w-3 h-3 text-gray-400" /> Oculto para clientes
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="p-4 text-gray-500 font-medium">{item.category}</td>
+                    <td className="p-4 text-gray-500 font-medium">
+                      <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-900 border border-amber-200/60 font-semibold text-[11px]">
+                        {item.category}
+                      </span>
+                    </td>
                     <td className="p-4 font-bold text-amber-600 whitespace-nowrap">${item.price.toFixed(2)} MXN</td>
-                    <td className="p-4">
-                      <div className="flex items-center justify-center gap-1.5">
+                    <td className="p-4 text-center whitespace-nowrap">
+                      {onToggleHideDish ? (
                         <button
-                          onClick={() => onUpdateStock(item.id, Math.max(0, item.stock - 5))}
-                          className="px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold"
-                        >
-                          -5
-                        </button>
-                        <span
-                          className={`px-3 py-1 rounded-lg font-bold w-12 text-center ${
-                            item.stock === 0
-                              ? 'bg-rose-100 text-rose-800'
-                              : item.stock <= 5
-                              ? 'bg-amber-100 text-amber-800 animate-pulse'
-                              : 'bg-gray-100 text-gray-800'
+                          type="button"
+                          onClick={() => onToggleHideDish(item.id)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold border transition-colors cursor-pointer shadow-2xs ${
+                            item.hidden
+                              ? 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
                           }`}
+                          title={item.hidden ? 'Platillo oculto. Clic para mostrar a clientes' : 'Platillo visible. Clic para ocultar de clientes'}
                         >
-                          {item.stock}
-                        </span>
-                        <button
-                          onClick={() => onUpdateStock(item.id, item.stock + 5)}
-                          className="px-2 py-1 border rounded bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold"
-                        >
-                          +5
+                          {item.hidden ? (
+                            <>
+                              <EyeOff className="w-3.5 h-3.5 text-gray-500" />
+                              <span>Oculto</span>
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Visible</span>
+                            </>
+                          )}
                         </button>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10.5px] font-bold border ${
+                          item.hidden
+                            ? 'bg-gray-100 text-gray-600 border-gray-300'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        }`}>
+                          {item.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          {item.hidden ? 'Oculto' : 'Visible'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-4 text-center">
+                      {/* Clean numeric input in exact format from screenshot */}
+                      <div className="inline-flex flex-col items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={item.stock}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                            onUpdateStock(item.id, val);
+                          }}
+                          className={`w-24 p-2 text-center font-extrabold text-xs border rounded-xl focus:ring-1 focus:ring-amber-500 focus:outline-hidden transition-all shadow-2xs ${
+                            item.stock === 0
+                              ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : item.stock <= 5
+                              ? 'bg-amber-50 border-amber-300 text-amber-900'
+                              : 'bg-white border-gray-200 text-gray-800'
+                          }`}
+                          title="Porciones disponibles (usa flechas o escribe)"
+                        />
+                        <span className={`text-[10px] font-semibold ${
+                          item.stock === 0
+                            ? 'text-rose-600 font-bold'
+                            : item.stock <= 5
+                            ? 'text-amber-700 font-bold animate-pulse'
+                            : 'text-gray-400'
+                        }`}>
+                          {item.stock === 0 ? 'Agotado' : `${item.stock} porc. activas`}
+                        </span>
                       </div>
                     </td>
                     <td className="p-4 text-gray-400">
@@ -583,12 +737,39 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                       ))}
                     </td>
                     <td className="p-4 text-right">
-                      <button
-                        onClick={() => onUpdateStock(item.id, 0)}
-                        className="text-[10px] text-rose-500 font-bold hover:underline"
-                      >
-                        Agotar Platillo
-                      </button>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            onUpdateStock(item.id, openingStock);
+                            triggerToast('success', 'Porción Restablecida', `${item.name}: ${openingStock} porciones.`);
+                          }}
+                          className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold transition-colors cursor-pointer shadow-2xs"
+                          title={`Cargar ${openingStock} porciones de apertura configuradas por el dueño`}
+                        >
+                          Apertura ({openingStock})
+                        </button>
+                        <button
+                          onClick={() => {
+                            onUpdateStock(item.id, 0);
+                            triggerToast('info', 'Platillo Agotado', `${item.name} marcado como agotado.`);
+                          }}
+                          className="text-[10px] text-rose-500 hover:text-rose-700 font-bold hover:underline cursor-pointer"
+                          title="Agotar platillo en el comal"
+                        >
+                          Agotar (0)
+                        </button>
+                        {onEditDish && (
+                          <button
+                            type="button"
+                            onClick={() => onEditDish(item)}
+                            className="text-[10px] text-amber-700 hover:text-amber-900 font-bold hover:underline cursor-pointer flex items-center gap-1 mt-0.5"
+                            title="Editar nombre, precio, categoría, foto, opciones y visibilidad"
+                          >
+                            <Edit3 className="w-3 h-3 text-amber-600" />
+                            Editar Platillo
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -620,19 +801,57 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-gray-600 mb-1">Categoría *</label>
-                      <select
-                        value={newDishCategory}
-                        onChange={e => setNewDishCategory(e.target.value)}
-                        className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden bg-white"
-                      >
-                        <option value="Chilaquiles">Chilaquiles</option>
-                        <option value="Huevos">Huevos</option>
-                        <option value="Antojitos">Antojitos</option>
-                        <option value="Bebidas">Bebidas</option>
-                      </select>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-gray-600">Categoría *</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomCategory(!isCustomCategory);
+                            if (!isCustomCategory) {
+                              setCustomCategoryInput('');
+                            }
+                          }}
+                          className="text-[10px] font-bold text-amber-600 hover:text-amber-800 underline cursor-pointer"
+                        >
+                          {isCustomCategory ? '← Lista existente' : '+ Personalizar'}
+                        </button>
+                      </div>
+
+                      {isCustomCategory ? (
+                        <input
+                          type="text"
+                          required
+                          placeholder="Escribe nueva categoría..."
+                          value={customCategoryInput}
+                          onChange={e => setCustomCategoryInput(e.target.value)}
+                          className="w-full p-2.5 border border-amber-400 bg-amber-50/50 rounded-xl text-xs font-bold text-amber-950 focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                          autoFocus
+                        />
+                      ) : (
+                        <select
+                          value={newDishCategory}
+                          onChange={e => {
+                            if (e.target.value === '__NEW__') {
+                              setIsCustomCategory(true);
+                              setCustomCategoryInput('');
+                            } else {
+                              setNewDishCategory(e.target.value);
+                            }
+                          }}
+                          className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden bg-white cursor-pointer"
+                        >
+                          {availableCategories.map(cat => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                          <option value="__NEW__" className="font-bold text-amber-600">
+                            + Otra categoría personalizada...
+                          </option>
+                        </select>
+                      )}
                     </div>
 
                     <div>
@@ -649,15 +868,53 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Porciones Disponibles en Stock *</label>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1 flex items-center justify-between">
+                      <span>Porciones Disponibles en Stock *</span>
+                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        Apertura: {openingStock}
+                      </span>
+                    </label>
                     <input
                       type="number"
                       required
-                      min={1}
+                      min={0}
+                      step="1"
                       value={newDishStock}
-                      onChange={e => setNewDishStock(Number(e.target.value))}
+                      onChange={e => setNewDishStock(Math.max(0, Number(e.target.value) || 0))}
                       className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                      placeholder={`Ej. ${openingStock}`}
                     />
+                    <p className="text-[9px] text-gray-400 mt-1">
+                      Cantidad de porciones para iniciar (predeterminado de apertura configurado por el dueño: {openingStock}).
+                    </p>
+                  </div>
+
+                  {/* Opción de ocultar platillo del menú */}
+                  <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <div className={`p-2 rounded-lg ${newDishHidden ? 'bg-amber-200/80 text-amber-900' : 'bg-emerald-100 text-emerald-800'}`}>
+                        {newDishHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-gray-900 block">
+                          Ocultar platillo del menú
+                        </span>
+                        <p className="text-[10px] text-gray-500">
+                          {newDishHidden
+                            ? 'Oculto: Los comensales NO lo verán en el menú digital (solo cocina y caja).'
+                            : 'Visible: Los comensales podrán ordenarlo desde el menú digital.'}
+                        </p>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={newDishHidden}
+                        onChange={e => setNewDishHidden(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-10 h-5 bg-gray-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                    </label>
                   </div>
 
                   <div>

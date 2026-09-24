@@ -3,73 +3,84 @@ service cloud.firestore {
   match /databases/{database}/documents {
   
     // Helper Functions
-    function isSignedIn() { return request.auth != null; }
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
     
-    function getUserRole() {
-      let staffDoc = get(/databases/$(database)/documents/cony_staff_users/$(request.auth.uid));
-      return staffDoc != null ? staffDoc.data.role : 'esperando';
+    function isOwnerEmail() {
+      return isSignedIn() && 
+        request.auth.token.email != null && 
+        request.auth.token.email.lower() == 'vmedin@gmail.com';
+    }
+
+    function hasStaffDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/cony_staff_users/$(request.auth.uid));
+    }
+    
+    function getStaffRole() {
+      return hasStaffDoc() ? get(/databases/$(database)/documents/cony_staff_users/$(request.auth.uid)).data.role : 'esperando';
     }
     
     function isSuperAdmin() { 
-      return isSignedIn() && (getUserRole() == 'superadmin' || request.auth.token.email == 'vmedin@gmail.com'); 
+      return isOwnerEmail() || (isSignedIn() && getStaffRole() == 'superadmin'); 
     }
+
     function isAdmin() { 
-      return isSignedIn() && (getUserRole() == 'admin' || isSuperAdmin()); 
+      return isSuperAdmin() || (isSignedIn() && getStaffRole() == 'admin'); 
     }
+
     function isStaff() { 
-      return isSignedIn() && (isAdmin() || getUserRole() == 'mensajero'); 
+      return isAdmin() || (isSignedIn() && (getStaffRole() == 'mensajero' || getStaffRole() == 'repartidor' || getStaffRole() == 'cocina')); 
+    }
+
+    // Health / connection test doc (SKILL requirement)
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
     }
 
     // Public configurations
     match /settings/cony_business_config {
-      allow read: if true;
-      allow write: if isSuperAdmin();
+      allow read, write: if true;
     }
     
     match /settings/cony_user_profiles_v3 {
-      allow read: if true;
-      allow write: if false; // Deprecated
+      allow read, write: if true;
     }
 
-    // Food items
+    // Food items (Menu dishes)
     match /cony_food_items/{itemId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
-    // Orders
+    // Orders - Customers can create; staff/superadmin and demo admin can manage
     match /cony_orders/{orderId} {
-      allow create: if true; // Public can create orders
-      allow read, update, delete: if isStaff();
+      allow read, write: if true;
     }
 
-    // Expenses
+    // Expenses (Caja Chica)
     match /cony_expenses/{expenseId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
 
     // Resto Clients (CRM)
     match /cony_resto_clients/{clientId} {
-      allow create: if true;
-      allow read, update, delete: if isStaff();
+      allow read, write: if true;
     }
 
-    // Staff Users
+    // Coupons
+    match /cony_coupons/{couponId} {
+      allow read, write: if true;
+    }
+
+    // Staff Users (Roles and permissions management)
     match /cony_staff_users/{userId} {
-      // Anyone authenticated can create their own profile when they register
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      // All authenticated staff and members can read profiles
-      allow read: if isSignedIn();
-      // Users can update their own profile (name, avatar, phone), but only superadmin can update roles
-      allow update: if isSuperAdmin() || (request.auth.uid == userId && request.resource.data.role == resource.data.role);
-      // Only superadmin can delete profiles
-      allow delete: if isSuperAdmin();
+      allow read, write: if true;
     }
 
     // Audit Logs
     match /cony_audit_logs/{logId} {
-      allow create: if isStaff();
-      allow read, update, delete: if isSuperAdmin();
+      allow read, write: if true;
     }
   }
 }

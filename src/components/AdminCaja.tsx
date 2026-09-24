@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Plus, Minus, CreditCard, Receipt, FileText, ChevronRight, DollarSign, X, Printer, CheckCircle } from 'lucide-react';
 import { FoodOrder, FoodItem, Expense, BusinessConfig } from '../types';
 
@@ -41,7 +41,13 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
   const [posCustomer, setPosCustomer] = useState<string>('Comensal Mostrador');
   const [posPhone, setPosPhone] = useState<string>('5500000000');
   const [posPayment, setPosPayment] = useState<'efectivo' | 'transferencia'>('efectivo');
-  const [posTip, setPosTip] = useState<number>(10);
+  const [posTip, setPosTip] = useState<number>(config?.suggestedTip !== undefined ? Number(config.suggestedTip) : 10);
+
+  useEffect(() => {
+    if (config?.suggestedTip !== undefined) {
+      setPosTip(Number(config.suggestedTip));
+    }
+  }, [config?.suggestedTip]);
 
   // Modifiers state inside POS
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
@@ -91,10 +97,19 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
   const handleToggleExtra = (extra: { name: string; price: number }) => {
     setModalExtras(prev => {
-      if (prev.some(e => e.name === extra.name)) {
-        return prev.filter(e => e.name !== extra.name);
+      const isMultiselect = selectedFood?.extrasMultiselect !== false;
+      if (!isMultiselect) {
+        if (prev.some(e => e.name === extra.name)) {
+          return [];
+        } else {
+          return [extra];
+        }
       } else {
-        return [...prev, extra];
+        if (prev.some(e => e.name === extra.name)) {
+          return prev.filter(e => e.name !== extra.name);
+        } else {
+          return [...prev, extra];
+        }
       }
     });
   };
@@ -155,6 +170,8 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
       clientName: posCustomer,
       clientPhone: posPhone,
       deliveryType: 'local',
+      address: 'Mostrador / En Local',
+      notes: 'Orden de mostrador cobrada en caja',
       items: posCart.map(c => ({
         itemId: c.item.id,
         name: c.item.name,
@@ -462,7 +479,12 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
                   {selectedFood.extras && selectedFood.extras.length > 0 && (
                     <div className="space-y-2">
-                      <h5 className="font-bold text-xs text-amber-950">Ingredientes Extras</h5>
+                      <div className="flex items-center justify-between">
+                        <h5 className="font-bold text-xs text-amber-950">Ingredientes Extras</h5>
+                        <span className="text-[10px] text-gray-500 font-semibold">
+                          {selectedFood.extrasMultiselect !== false ? 'Múltiple' : 'Única (Máx. 1)'}
+                        </span>
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         {selectedFood.extras.map(ex => {
                           const isSel = modalExtras.some(e => e.name === ex.name);
@@ -470,12 +492,17 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                             <button
                               key={ex.name}
                               onClick={() => handleToggleExtra(ex)}
-                              className={`p-2 border rounded-lg text-xs text-left transition-all ${
+                              className={`p-2 border rounded-lg text-xs text-left transition-all flex items-center justify-between ${
                                 isSel ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold' : 'border-gray-200 text-gray-500'
                               }`}
                             >
-                              <p className="font-medium">{ex.name}</p>
-                              <p className="text-[9px] text-amber-600">+${ex.price} MXN</p>
+                              <div>
+                                <p className="font-medium">{ex.name}</p>
+                                <p className="text-[9px] text-amber-600">+${ex.price} MXN</p>
+                              </div>
+                              {isSel && (
+                                <span className="text-amber-600 font-bold text-xs">✓</span>
+                              )}
                             </button>
                           );
                         })}
@@ -731,6 +758,12 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                           <span>Subtotal:</span>
                           <span>${showThermalTicket.subtotal.toFixed(2)}</span>
                         </div>
+                        {showThermalTicket.discountAmount && showThermalTicket.discountAmount > 0 && (
+                          <div className="flex justify-between text-emerald-700 font-bold">
+                            <span>Descuento ({showThermalTicket.couponCode || 'Cupón'}):</span>
+                            <span>-${showThermalTicket.discountAmount.toFixed(2)}</span>
+                          </div>
+                        )}
                         {showThermalTicket.deliveryFee > 0 && (
                           <div className="flex justify-between">
                             <span>Envío:</span>

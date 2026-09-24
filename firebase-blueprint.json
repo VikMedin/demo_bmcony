@@ -1,0 +1,147 @@
+{
+  "entities": {
+    "FoodItem": {
+      "title": "FoodItem",
+      "description": "A food item or dish available in the Desayunos Cony restaurant menu.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "description": { "type": "string" },
+        "stock": { "type": "number" },
+        "popular": { "type": "boolean" },
+        "options": { "type": "array" },
+        "extras": { "type": "array" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "FoodOrder": {
+      "title": "FoodOrder",
+      "description": "An order placed by a customer or POS cashier.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "clientName": { "type": "string" },
+        "clientPhone": { "type": "string" },
+        "deliveryType": { "type": "string", "enum": ["local", "llevar", "domicilio"] },
+        "address": { "type": "string" },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["efectivo", "transferencia"] },
+        "status": { "type": "string", "enum": ["pendiente", "preparando", "listo", "entregado", "cancelado"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "orderNumber", "clientName", "total", "status"]
+    },
+    "RestoClient": {
+      "title": "RestoClient",
+      "description": "A customer profile in the CRM database.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "orderCount": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "tier": { "type": "string", "enum": ["nuevo", "frecuente", "honor", "estrella"] }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An expense or cash outflow recorded in Caja Chica.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "responsible": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "description", "amount", "category"]
+    },
+    "BusinessConfig": {
+      "title": "BusinessConfig",
+      "description": "General business settings and operational parameters.",
+      "type": "object",
+      "properties": {
+        "businessName": { "type": "string" },
+        "slogan": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "openingTime": { "type": "string" },
+        "closingTime": { "type": "string" },
+        "isOpen": { "type": "boolean" },
+        "deliveryFee": { "type": "number" },
+        "brandLogo": { "type": "string" }
+      },
+      "required": ["businessName", "deliveryFee"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "A staff collaborator or administrator user account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["superadmin", "admin", "cocina", "repartidor", "mensajero", "esperando"] },
+        "avatar": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System event and security audit trail record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "user": { "type": "string" },
+        "role": { "type": "string" },
+        "action": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "user", "action"]
+    }
+  },
+  "firestore": {
+    "/cony_food_items/{itemId}": {
+      "schema": "FoodItem",
+      "description": "Collection of dishes and items in the breakfast menu."
+    },
+    "/cony_orders/{orderId}": {
+      "schema": "FoodOrder",
+      "description": "Collection of orders for kitchen and delivery."
+    },
+    "/cony_resto_clients/{clientId}": {
+      "schema": "RestoClient",
+      "description": "Collection of customer records in the CRM."
+    },
+    "/cony_expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Collection of petty cash expenses."
+    },
+    "/settings/cony_business_config": {
+      "schema": "BusinessConfig",
+      "description": "Singleton configuration document for the restaurant."
+    },
+    "/cony_staff_users/{userId}": {
+      "schema": "StaffUser",
+      "description": "Collection of authenticated staff members."
+    },
+    "/cony_audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Collection of audit activity logs."
+    }
+  }
+}

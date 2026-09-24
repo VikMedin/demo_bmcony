@@ -64,6 +64,7 @@ export interface FoodItem {
   category: string;
   stock: number;
   image: string;
+  hidden?: boolean; // Si true, el platillo se oculta del menú para los comensales
   order?: number;
   options?: {
     title: string;
@@ -74,6 +75,7 @@ export interface FoodItem {
     name: string;
     price: number;
   }[];
+  extrasMultiselect?: boolean; // Si true permite múltiples extras, si false selección única (máximo 1)
 }
 
 export interface RestoClient {
@@ -93,6 +95,17 @@ export interface Expense {
   date: string;
 }
 
+export interface Coupon {
+  id: string;
+  code: string; // e.g. "CONYLOVE10", uppercase
+  discountPercentage: number; // Percentage discount, e.g. 10 for 10%
+  description: string;
+  minPurchase?: number; // Minimum order subtotal in MXN to apply
+  isActive: boolean;
+  targetTier?: 'all' | 'estrella' | 'honor' | 'frecuente' | 'nuevo';
+  createdAt?: string;
+}
+
 export interface FoodOrder {
   id: string;
   orderNumber: string;
@@ -110,6 +123,9 @@ export interface FoodOrder {
     selectedExtras: { name: string; price: number }[];
   }[];
   subtotal: number;
+  couponCode?: string;
+  discountPercentage?: number;
+  discountAmount?: number;
   deliveryFee: number;
   tip: number;
   total: number;
@@ -122,12 +138,16 @@ export interface FoodOrder {
 
 export interface BusinessConfig {
   whatsappPhone: string;
+  deliveryPhone?: string; // Teléfono móvil/WhatsApp del repartidor/mensajero
   scheduleStart: string; // e.g. "07:30"
   scheduleEnd: string; // e.g. "13:30"
   isOpenManual: boolean;
+  is24Hours?: boolean;
   ticketFooter: string;
   deliveryFee: number;
   brandLogo: string;
+  suggestedTip?: number;
+  defaultOpeningStock?: number; // Porciones de apertura de platillos configurables por el dueño
   businessName?: string;
   slogan?: string;
   address?: string;

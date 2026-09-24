@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, User, Lock, ArrowRight, UserPlus, KeyRound } from 'lucide-react';
+import { ShieldCheck, User, Lock, ArrowRight, UserPlus, KeyRound, Utensils, Coins, Tag, BookOpen, Clock, Users } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -9,14 +9,22 @@ import {
   signInWithPopup
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { StaffRole } from '../types';
 
 interface AdminLoginProps {
   onLoginSuccess: () => void;
   triggerToast: (type: 'success' | 'error' | 'info', title: string, description?: string) => void;
+  onSelectDemoRole?: (role: StaffRole) => void;
   onCancel?: () => void;
 }
 
-export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerToast, onCancel }) => {
+export const AdminLogin: React.FC<AdminLoginProps> = ({ 
+  onLoginSuccess, 
+  triggerToast, 
+  onSelectDemoRole,
+  onCancel 
+}) => {
+  const [activeTab, setActiveTab] = useState<'demo' | 'auth'>('demo');
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
@@ -31,7 +39,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
       const user = result.user;
       const isOwner = user.email?.toLowerCase() === 'vmedin@gmail.com';
 
-      // Check or create profile
+      // Check or create profile in cony_staff_users
       try {
         const docRef = doc(db, 'cony_staff_users', user.uid);
         const docSnap = await getDoc(docRef);
@@ -44,6 +52,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
             phone: '',
             role: isOwner ? 'superadmin' : 'esperando',
             avatar: user.photoURL || '',
+            isDemo: false,
             createdAt: new Date().toISOString()
           });
         } else if (isOwner && docSnap.data().role !== 'superadmin') {
@@ -99,6 +108,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
                 phone: '',
                 role: 'superadmin',
                 avatar: '',
+                isDemo: false,
                 createdAt: new Date().toISOString()
               });
             }
@@ -122,6 +132,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
             phone: '',
             role: role,
             avatar: '',
+            isDemo: false,
             createdAt: new Date().toISOString()
           });
         } catch (dbErr) {
@@ -131,7 +142,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
         triggerToast(
           'success', 
           'Cuenta Creada', 
-          `Registro exitoso. ${role === 'esperando' ? 'Tu cuenta está en espera de aprobación por el Administrador.' : '¡Bienvenido SuperAdministrador!'}`
+          `Registro exitoso. ${role === 'esperando' ? 'Tu cuenta está en espera de aprobación por el Administrador (vmedin@gmail.com).' : '¡Bienvenido SuperAdministrador!'}`
         );
         onLoginSuccess();
       } else if (mode === 'forgot') {
@@ -163,137 +174,319 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, triggerT
   };
 
   return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center px-4" id="admin-login-view">
-      <div className="bg-white border border-gray-200 shadow-xl rounded-2xl max-w-md w-full p-8 relative overflow-hidden">
+    <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-8" id="admin-login-view">
+      <div className="bg-white border border-gray-200 shadow-2xl rounded-2xl max-w-lg w-full p-6 sm:p-8 relative overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-500" />
         
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center p-3 rounded-full bg-amber-50 text-amber-600 mb-3">
+          <div className="inline-flex items-center justify-center p-3 rounded-full bg-amber-50 text-amber-600 mb-2">
             <ShieldCheck className="w-8 h-8" />
           </div>
           <h2 className="text-2xl font-serif font-bold text-amber-950">
-            {mode === 'login' ? 'Panel de Control' : mode === 'register' ? 'Crear Cuenta' : 'Recuperar Acceso'}
+            Acceso al Sistema Cony
           </h2>
           <p className="text-xs text-gray-500 mt-1">
-            {mode === 'login' ? 'Ingresa con tu cuenta para administrar Desayunos Cony.' : 
-             mode === 'register' ? 'Regístrate para obtener acceso al sistema del desayunador.' : 
-             'Te enviaremos un enlace para cambiar tu contraseña.'}
+            Plataforma de gestión de operaciones, cocina, caja y pedidos.
           </p>
         </div>
 
-        {/* GOOGLE SIGN IN BUTTON */}
-        <div className="mb-5">
+        {/* Tab Toggle: Demo vs Auth */}
+        <div className="flex p-1 bg-amber-50/80 rounded-xl border border-amber-200 mb-6">
           <button
             type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isLoading}
-            className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-3 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
-            id="google-signin-btn"
+            onClick={() => setActiveTab('demo')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'demo'
+                ? 'bg-amber-500 text-white shadow-xs'
+                : 'text-amber-900 hover:text-amber-950'
+            }`}
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            <span>Continuar con Google</span>
+            <span>🧪 Usuarios Demo (1 Clic)</span>
           </button>
-
-          <div className="relative my-4">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-gray-400 text-[10px] font-semibold">o ingresar con correo</span>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('auth')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'auth'
+                ? 'bg-amber-500 text-white shadow-xs'
+                : 'text-amber-900 hover:text-amber-950'
+            }`}
+          >
+            <span>🔐 Google / Contraseña</span>
+          </button>
         </div>
 
-        <form onSubmit={handleAuth} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Correo Electrónico</label>
-            <div className="relative">
-              <User className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-              <input
-                type="email"
-                required
-                placeholder="tu-correo@ejemplo.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
-              />
-            </div>
+        {/* TAB 1: DEMO USERS (1-CLICK DIRECT ENTRY) */}
+        {activeTab === 'demo' && (
+          <div className="space-y-3 animate-fade-in">
+            <p className="text-[11px] text-gray-500 text-center mb-2">
+              Ingresa de inmediato con uno de los perfiles demo autorizados para probar los permisos de cada área:
+            </p>
+
+            {/* Super Admin / Owner */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSelectDemoRole) onSelectDemoRole('superadmin');
+              }}
+              className="w-full text-left p-3.5 rounded-xl border border-amber-200 bg-amber-50/40 hover:bg-amber-100/60 hover:border-amber-300 transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-200/80 text-amber-950 font-black text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                  👑
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-amber-950">Superusuario (Dueño)</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-200 text-amber-900">
+                      vmedin@gmail.com
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-0.5">
+                    <strong>Control total de roles del personal</strong> y acceso a todos los módulos.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-amber-700 group-hover:translate-x-1 transition-transform">
+                Entrar →
+              </span>
+            </button>
+
+            {/* Cocina */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSelectDemoRole) onSelectDemoRole('cocina');
+              }}
+              className="w-full text-left p-3.5 rounded-xl border border-orange-200 bg-orange-50/40 hover:bg-orange-100/60 hover:border-orange-300 transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-orange-200/80 text-orange-950 font-black text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                  🍳
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-orange-950">Cocina</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-orange-200 text-orange-900">
+                      cocina@desayunador.com
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-0.5">
+                    Solo <strong>Cocina / Kanban</strong>, <strong>Menú y Platillos</strong> y <strong>Carta Digital</strong>.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-orange-700 group-hover:translate-x-1 transition-transform">
+                Entrar →
+              </span>
+            </button>
+
+            {/* Administrativo */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSelectDemoRole) onSelectDemoRole('admin');
+              }}
+              className="w-full text-left p-3.5 rounded-xl border border-blue-200 bg-blue-50/40 hover:bg-blue-100/60 hover:border-blue-300 transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-200/80 text-blue-950 font-black text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                  📋
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-blue-950">Administrativo</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-200 text-blue-900">
+                      carlos.admin@desayunador.com
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-0.5">
+                    Cocina, <strong>Caja y POS</strong>, <strong>Clientes CRM</strong>, <strong>Cupones</strong>, <strong>Menú</strong> y <strong>Carta</strong>.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-blue-700 group-hover:translate-x-1 transition-transform">
+                Entrar →
+              </span>
+            </button>
+
+            {/* Repartidor */}
+            <button
+              type="button"
+              onClick={() => {
+                if (onSelectDemoRole) onSelectDemoRole('repartidor');
+              }}
+              className="w-full text-left p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/40 hover:bg-emerald-100/60 hover:border-emerald-300 transition-all flex items-center justify-between group cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-200/80 text-emerald-950 font-black text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                  🛵
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-emerald-950">Repartidor</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900">
+                      reparto@desayunador.com
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-0.5">
+                    Solo <strong>Vista Repartidor</strong> y <strong>Carta Digital</strong>.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-bold text-emerald-700 group-hover:translate-x-1 transition-transform">
+                Entrar →
+              </span>
+            </button>
           </div>
-          
-          {mode !== 'forgot' && (
+        )}
+
+        {/* TAB 2: AUTHENTICATED ACCESS (GOOGLE / EMAIL) */}
+        {activeTab === 'auth' && (
+          <div className="space-y-4 animate-fade-in">
+            {/* GOOGLE SIGN IN BUTTON */}
             <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Contraseña</label>
-              <div className="relative">
-                <Lock className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
-                <input
-                  type="password"
-                  required
-                  placeholder="Mínimo 6 caracteres"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
-                />
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 font-semibold rounded-xl text-xs flex items-center justify-center gap-3 transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
+                id="google-signin-btn"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                  />
+                </svg>
+                <span>Continuar con Google</span>
+              </button>
+
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-gray-400 text-[10px] font-semibold">o ingresar con correo</span>
+                </div>
               </div>
             </div>
-          )}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm mt-2 cursor-pointer"
-          >
-            {isLoading ? 'Procesando...' : (
-              <>
-                {mode === 'login' ? 'Validar Acceso' : mode === 'register' ? 'Registrarme' : 'Enviar Enlace'}
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </form>
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Correo Electrónico</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="tu-correo@ejemplo.com"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                  />
+                </div>
+              </div>
+              
+              {mode !== 'forgot' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-600">Contraseña</label>
+                    {mode === 'login' && (
+                      <button 
+                        type="button" 
+                        onClick={() => setMode('forgot')}
+                        className="text-[11px] text-amber-600 hover:text-amber-800 font-semibold"
+                      >
+                        ¿Olvidaste tu contraseña?
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3.5 top-3 w-4 h-4 text-gray-400" />
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              )}
 
-        <div className="mt-6 flex flex-col items-center gap-2.5">
-          {mode === 'login' && (
-            <>
-              <button type="button" onClick={() => setMode('register')} className="text-xs text-amber-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer">
-                <UserPlus className="w-3.5 h-3.5" /> No tengo cuenta, registrarme
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-amber-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isLoading ? (
+                  <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                ) : (
+                  <>
+                    <span>
+                      {mode === 'login' ? 'Iniciar Sesión' : mode === 'register' ? 'Crear mi Cuenta' : 'Enviar Enlace'}
+                    </span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
-              <button type="button" onClick={() => setMode('forgot')} className="text-xs text-gray-500 hover:underline flex items-center gap-1 cursor-pointer">
-                <KeyRound className="w-3.5 h-3.5" /> Olvidé mi contraseña
-              </button>
-            </>
-          )}
-          {mode !== 'login' && (
-            <button type="button" onClick={() => setMode('login')} className="text-xs text-amber-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer">
-              <ArrowRight className="w-3.5 h-3.5 rotate-180" /> Volver a Iniciar Sesión
-            </button>
-          )}
-        </div>
 
+              <div className="pt-2 text-center text-xs text-gray-500 flex items-center justify-center gap-1">
+                {mode === 'login' ? (
+                  <>
+                    <span>¿Eres nuevo personal?</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setMode('register')}
+                      className="text-amber-600 font-bold hover:underline"
+                    >
+                      Registrarme
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span>¿Ya tienes cuenta?</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setMode('login')}
+                      className="text-amber-600 font-bold hover:underline"
+                    >
+                      Iniciar Sesión
+                    </button>
+                  </>
+                )}
+              </div>
+            </form>
+
+            <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-800 space-y-1">
+              <strong>💡 Nota de Autorización:</strong> El correo <strong>vmedin@gmail.com</strong> tiene asignado automáticamente el rol de Dueño (Superusuario). Los demás colaboradores quedan pendientes de asignación por el Dueño en la sección de Ajustes del Negocio.
+            </div>
+          </div>
+        )}
+
+        {/* Cancel button */}
         {onCancel && (
-          <div className="mt-5 pt-4 border-t border-gray-100">
+          <div className="mt-5 pt-4 border-t border-gray-100 text-center">
             <button
               type="button"
               onClick={onCancel}
-              className="w-full py-2 bg-gray-50 hover:bg-gray-100 text-gray-600 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors border border-gray-200 cursor-pointer"
+              className="text-xs text-gray-500 hover:text-gray-800 font-semibold underline"
             >
-              Volver a la Carta Pública
+              Volver a la Carta Digital (Comensal)
             </button>
           </div>
         )}

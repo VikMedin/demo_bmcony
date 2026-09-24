@@ -747,8 +747,8 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                               </button>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-bold text-amber-950">${rowTotal.toFixed(2)}</p>
+                          <div className="text-right shrink-0">
+                            <p className="text-xs font-bold text-amber-950 whitespace-nowrap">${rowTotal.toFixed(2)}</p>
                             <button
                               onClick={() => updateCartQty(c.id, -c.quantity)}
                               className="text-[10px] text-rose-500 hover:underline mt-1.5"

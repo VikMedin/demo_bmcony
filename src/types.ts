@@ -128,4 +128,8 @@ export interface BusinessConfig {
   ticketFooter: string;
   deliveryFee: number;
   brandLogo: string;
+  businessName?: string;
+  slogan?: string;
+  address?: string;
+  themeColor?: string;
 }

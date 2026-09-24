@@ -547,7 +547,7 @@ export const AdminKitchen: React.FC<AdminKitchenProps> = ({
                       <span>{item.name}</span>
                     </td>
                     <td className="p-4 text-gray-500 font-medium">{item.category}</td>
-                    <td className="p-4 font-bold text-amber-600">${item.price.toFixed(2)} MXN</td>
+                    <td className="p-4 font-bold text-amber-600 whitespace-nowrap">${item.price.toFixed(2)} MXN</td>
                     <td className="p-4">
                       <div className="flex items-center justify-center gap-1.5">
                         <button

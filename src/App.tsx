@@ -32,6 +32,7 @@ import {
 import {
   CommonToast
 } from './components/CommonToast';
+import { getThemeStyles } from './utils/colors';
 
 import {
   Client,
@@ -560,6 +561,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#FAF9F5] text-[#2C241E] flex flex-col font-sans selection:bg-amber-200">
+      <style>{getThemeStyles(businessConfig.themeColor || '#f59e0b')}</style>
+      
       {/* GLOBAL MASTER HEADER */}
       <header className="bg-white border-b border-gray-150 sticky top-0 z-40 shadow-xs" id="master-header">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
@@ -590,8 +593,8 @@ export default function App() {
                 className="h-10 w-10 rounded-xl object-cover border border-amber-200/60 shadow-xs shrink-0" 
               />
               <div className="flex flex-col">
-                <span className="font-serif font-extrabold text-base sm:text-lg text-amber-950 tracking-tight leading-tight">Desayunos Cony</span>
-                <span className="text-[9px] sm:text-[10px] text-amber-600 font-bold leading-none">Delicias del Comal</span>
+                <span className="font-serif font-extrabold text-base sm:text-lg text-amber-950 tracking-tight leading-tight">{businessConfig.businessName || 'Desayunos Cony'}</span>
+                <span className="text-[9px] sm:text-[10px] text-amber-600 font-bold leading-none">{businessConfig.slogan || 'El auténtico sabor de casa'}</span>
               </div>
             </div>
           </div>
@@ -851,6 +854,7 @@ export default function App() {
                       expenses={expenses}
                       triggerToast={triggerToast}
                       role={userRole as 'superadmin' | 'admin'}
+                      config={businessConfig}
                     />
                   </div>
                 )}
@@ -931,11 +935,95 @@ export default function App() {
                             isOpenManual: target.openManual.checked,
                             ticketFooter: target.footer.value,
                             deliveryFee: Number(target.fee.value),
-                            brandLogo: target.brandLogo ? target.brandLogo.value : businessConfig.brandLogo
+                            brandLogo: target.brandLogo ? target.brandLogo.value : businessConfig.brandLogo,
+                            businessName: target.businessName.value,
+                            slogan: target.slogan.value,
+                            address: target.address.value,
+                            themeColor: target.themeColor.value
                           });
                         }}
                         className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4"
                       >
+                        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 pb-4 border-b border-gray-100">
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Nombre del Negocio *</label>
+                            <input
+                              type="text"
+                              name="businessName"
+                              defaultValue={businessConfig.businessName || 'Desayunos Cony'}
+                              placeholder="Ej. Desayunos Cony"
+                              className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Eslogan *</label>
+                            <input
+                              type="text"
+                              name="slogan"
+                              defaultValue={businessConfig.slogan || 'El auténtico sabor de casa'}
+                              placeholder="Ej. El auténtico sabor de casa"
+                              className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                              required
+                            />
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">Dirección del Local</label>
+                            <input
+                              type="text"
+                              name="address"
+                              defaultValue={businessConfig.address || ''}
+                              placeholder="Ej. Av. Principal #123, Colonia Centro"
+                              className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                            />
+                          </div>
+                          
+                          {/* COLOR THEME PICKER */}
+                          <div className="md:col-span-2 pt-2">
+                            <label className="block text-xs font-semibold text-gray-600 mb-2">Color Principal de la Marca</label>
+                            <div className="flex flex-wrap items-center gap-3">
+                              {/* Swatches */}
+                              {[
+                                { name: 'Ámbar (Original)', hex: '#f59e0b' },
+                                { name: 'Rojo Carmesí', hex: '#ef4444' },
+                                { name: 'Verde Esmeralda', hex: '#10b981' },
+                                { name: 'Azul Océano', hex: '#0ea5e9' },
+                                { name: 'Violeta Real', hex: '#8b5cf6' },
+                                { name: 'Rosa Vivo', hex: '#ec4899' },
+                              ].map(c => (
+                                <button
+                                  key={c.hex}
+                                  type="button"
+                                  title={c.name}
+                                  onClick={() => {
+                                    const el = document.getElementById('themeColorInput') as HTMLInputElement;
+                                    if (el) el.value = c.hex;
+                                  }}
+                                  className="w-8 h-8 rounded-full border-2 border-white shadow-sm ring-1 ring-gray-200 transition-transform hover:scale-110"
+                                  style={{ backgroundColor: c.hex }}
+                                />
+                              ))}
+                              
+                              <div className="h-6 w-px bg-gray-300 mx-2" />
+                              
+                              {/* Custom Hex Color Picker */}
+                              <div className="flex items-center gap-2 bg-gray-50 p-1.5 rounded-lg border border-gray-200">
+                                <label htmlFor="themeColorInput" className="text-[10px] text-gray-500 font-bold ml-1 cursor-pointer">
+                                  Personalizado:
+                                </label>
+                                <input
+                                  type="color"
+                                  id="themeColorInput"
+                                  name="themeColor"
+                                  defaultValue={businessConfig.themeColor || '#f59e0b'}
+                                  className="w-8 h-8 cursor-pointer rounded bg-transparent border-0 p-0 color-input-style"
+                                />
+                              </div>
+                            </div>
+                            <p className="text-[9px] text-gray-400 mt-2">El color seleccionado modificará los botones, acentos visuales e identidad gráfica de la plataforma.</p>
+                          </div>
+                        </div>
+
                         <div>
                           <label className="block text-xs font-semibold text-gray-600 mb-1">WhatsApp del Negocio *</label>
                           <input
@@ -1022,16 +1110,11 @@ export default function App() {
                           </div>
 
                           <div>
-                            <span className="block text-xs font-bold text-gray-600 mb-1">O Pegar Enlace (URL Directa)</span>
                             <input
-                              type="text"
+                              type="hidden"
                               id="brandLogoInput"
                               name="brandLogo"
                               defaultValue={businessConfig.brandLogo}
-                              disabled={userRole !== 'superadmin'}
-                              placeholder="Ej. https://images.unsplash.com/photo-..."
-                              className={`w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden ${userRole !== 'superadmin' ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : ''}`}
-                              required
                             />
                             {userRole !== 'superadmin' ? (
                               <p className="text-[9.5px] text-rose-600 mt-1 font-bold">⚠️ El logotipo del desayunador solo puede ser modificado por el Superadministrador.</p>

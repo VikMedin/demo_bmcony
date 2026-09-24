@@ -1,0 +1,4 @@
+@import "tailwindcss";
+@theme {
+  --color-amber-500: #ff0000;
+}

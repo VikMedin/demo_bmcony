@@ -293,8 +293,8 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                   {posCart.map(c => {
                     const rowSub = (c.item.price + c.selectedExtras.reduce((s, e) => s + e.price, 0)) * c.quantity;
                     return (
-                      <div key={c.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
-                        <div className="flex-1 min-w-0">
+                      <div key={c.id} className="py-2.5 flex items-start justify-between gap-2 sm:gap-3 text-xs">
+                        <div className="flex-1 min-w-0 pr-2">
                           <p className="font-bold text-amber-950 truncate">{c.item.name}</p>
                           {/* Modifiers summary */}
                           {Object.values(c.selectedOptions).flat().map((opStr, i) => (
@@ -326,7 +326,7 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                           </div>
                         </div>
 
-                        <span className="font-bold text-amber-950 shrink-0">
+                        <span className="font-bold text-amber-950 shrink-0 whitespace-nowrap text-sm mt-0.5">
                           ${rowSub.toFixed(2)}
                         </span>
                       </div>
@@ -517,26 +517,24 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-xl space-y-1">
-                <span className="text-[10px] text-amber-800 font-semibold uppercase">Ventas Brutas Totales</span>
-                <p className="text-2xl font-serif font-bold text-amber-950">${bruteTotal.toFixed(2)}</p>
+              <div className="p-4 bg-amber-50/50 border border-amber-200 rounded-xl space-y-1 min-w-[200px]">
+                <span className="text-[10px] text-amber-800 font-semibold uppercase whitespace-nowrap">Ventas Brutas Totales</span>
+                <p className="text-2xl font-bold text-amber-950 whitespace-nowrap overflow-hidden text-ellipsis" title={`${bruteTotal.toFixed(2)}`}>${bruteTotal.toFixed(2)}</p>
                 <div className="flex justify-between text-[10px] text-amber-600 mt-2">
-                  <span>💵 Efectivo: ${bruteEfectivo.toFixed(0)}</span>
-                  <span>🏦 Transf: ${bruteTransferencia.toFixed(0)}</span>
+                  <span className="whitespace-nowrap">💵 Efectivo: ${bruteEfectivo.toFixed(0)}</span>
+                  <span className="whitespace-nowrap">🏦 Transf: ${bruteTransferencia.toFixed(0)}</span>
                 </div>
               </div>
-
-              <div className="p-4 bg-rose-50/50 border border-rose-200 rounded-xl space-y-1">
-                <span className="text-[10px] text-rose-800 font-semibold uppercase">Egresos / Gastos Diarios</span>
-                <p className="text-2xl font-serif font-bold text-rose-950">-${totalExpenses.toFixed(2)}</p>
-                <p className="text-[10px] text-rose-500 mt-2">Restado automáticamente de la neta</p>
+              <div className="p-4 bg-rose-50/50 border border-rose-200 rounded-xl space-y-1 min-w-[200px]">
+                <span className="text-[10px] text-rose-800 font-semibold uppercase whitespace-nowrap">Egresos / Gastos Diarios</span>
+                <p className="text-2xl font-bold text-rose-950 whitespace-nowrap overflow-hidden text-ellipsis" title={`-${totalExpenses.toFixed(2)}`}>-${totalExpenses.toFixed(2)}</p>
+                <p className="text-[10px] text-rose-500 mt-2 truncate">Restado automáticamente de la neta</p>
               </div>
-
-              <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-1">
-                <span className="text-[10px] text-emerald-800 font-semibold uppercase">Ganancia Neta Real</span>
-                <p className="text-2xl font-serif font-bold text-emerald-950">${netEarnings.toFixed(2)}</p>
+              <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-1 min-w-[200px]">
+                <span className="text-[10px] text-emerald-800 font-semibold uppercase whitespace-nowrap">Ganancia Neta Real</span>
+                <p className="text-2xl font-bold text-emerald-950 whitespace-nowrap overflow-hidden text-ellipsis" title={`${netEarnings.toFixed(2)}`}>${netEarnings.toFixed(2)}</p>
                 <div className="flex justify-between text-[10px] text-emerald-600 mt-2">
-                  <span>💖 Propinas del equipo: ${totalTips.toFixed(0)}</span>
+                  <span className="truncate">💖 Propinas del equipo: ${totalTips.toFixed(0)}</span>
                 </div>
               </div>
             </div>
@@ -549,16 +547,16 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
               <h4 className="font-serif font-bold text-sm text-amber-950">Historial de Ventas</h4>
               <div className="divide-y divide-gray-100 max-h-[350px] overflow-y-auto pr-1">
                 {orders.map(order => (
-                  <div key={order.id} className={`py-3 flex items-center justify-between gap-3 text-xs ${order.status === 'cancelado' ? 'opacity-50' : ''}`}>
-                    <div>
-                      <p className={`font-bold ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                  <div key={order.id} className={`py-3 flex items-center justify-between gap-2 sm:gap-3 text-xs ${order.status === 'cancelado' ? 'opacity-50' : ''}`}>
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className={`font-bold leading-tight ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                         {order.orderNumber} ({order.clientName})
-                        {order.status === 'cancelado' && <span className="ml-2 text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded no-underline">Cancelado</span>}
+                        {order.status === 'cancelado' && <span className="ml-2 text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded no-underline inline-block">Cancelado</span>}
                       </p>
-                      <p className="text-[10px] text-gray-400">{order.createdAt.split('T')[0]} • {order.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transf'}</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{order.createdAt.split('T')[0]} • {order.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transf'}</p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`font-bold ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-amber-950'}`}>${order.total.toFixed(2)}</span>
+                    <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                      <span className={`font-bold whitespace-nowrap text-sm ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-amber-950'}`}>${order.total.toFixed(2)}</span>
                       {order.status !== 'cancelado' && (
                         <button
                           onClick={() => setShowThermalTicket(order)}
@@ -582,13 +580,13 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                   <p className="text-xs text-gray-400 py-12 text-center">No hay gastos reportados el día de hoy.</p>
                 ) : (
                   expenses.map(exp => (
-                    <div key={exp.id} className="py-3 flex items-center justify-between gap-3 text-xs">
-                      <div>
-                        <p className="font-semibold text-gray-800">{exp.concept}</p>
-                        <p className="text-[10px] text-gray-400">{exp.date}</p>
+                    <div key={exp.id} className="py-3 flex flex-row items-center justify-between gap-2 sm:gap-3 text-xs">
+                      <div className="min-w-0 flex-1 pr-2">
+                        <p className="font-semibold text-gray-800 leading-tight">{exp.concept}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">{exp.date}</p>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="font-bold text-rose-600">-${exp.amount.toFixed(2)}</span>
+                      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                        <span className="font-bold text-rose-600 whitespace-nowrap text-sm">-${exp.amount.toFixed(2)}</span>
                         <button
                           onClick={() => {
                             onDeleteExpense(exp.id);

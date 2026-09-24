@@ -187,9 +187,9 @@ export const AdminRepartidor: React.FC<AdminRepartidorProps> = ({
                 <div className="bg-gray-50 p-3 rounded-xl border flex justify-between items-center text-xs">
                   <div>
                     <p className="text-gray-400 text-[9px]">TOTAL A COBRAR:</p>
-                    <p className="font-bold text-amber-950 text-sm">${order.total.toFixed(2)} MXN</p>
+                    <p className="font-bold text-amber-950 text-sm whitespace-nowrap">${order.total.toFixed(2)} MXN</p>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 bg-gray-200 text-gray-700 font-bold rounded">
+                  <span className="text-[10px] px-2 py-0.5 bg-gray-200 text-gray-700 font-bold rounded shrink-0 ml-2 text-right">
                     {order.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transferencia'}
                   </span>
                 </div>

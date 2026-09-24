@@ -1,5 +1,66 @@
 @import "tailwindcss";
 
+@theme {
+  --color-amber-50: var(--theme-50, #fffbeb);
+  --color-amber-100: var(--theme-100, #fef3c7);
+  --color-amber-200: var(--theme-200, #fde68a);
+  --color-amber-300: var(--theme-300, #fcd34d);
+  --color-amber-400: var(--theme-400, #fbbf24);
+  --color-amber-500: var(--theme-500, #f59e0b);
+  --color-amber-600: var(--theme-600, #d97706);
+  --color-amber-700: var(--theme-700, #b45309);
+  --color-amber-800: var(--theme-800, #92400e);
+  --color-amber-900: var(--theme-900, #78350f);
+  --color-amber-950: var(--theme-950, #451a03);
+}
+
+/* Tipografía dinámica y adaptable */
+html {
+  /* Garantiza que textos largos se rompan si el contenedor es muy pequeño */
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  -ms-word-break: break-all;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+/* Tamaño de letra "Grande" responsive */
 html.font-size-large {
-  font-size: 120%; /* Makes all rem units 20% larger for better accessibility */
+  /* Usa clamp para escalar fluido: mínimo 105%, ideal basado en pantalla, máximo 125% */
+  font-size: clamp(105%, 2vw + 60%, 125%);
+}
+
+/* Evitar que elementos excedan su contenedor padre al reducir la pantalla */
+* {
+  max-width: 100%;
+}
+
+/* Excepciones donde max-width: 100% no es deseado o rompe el layout */
+.flex, .grid, img, svg, iframe, table, th, td, tr, thead, tbody {
+  max-width: none;
+}
+
+/* Tablas con scroll horizontal en móviles para no deformar la app */
+.table-responsive {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Botones y cards ajustables (text-wrap) */
+button, p, span, h1, h2, h3, h4, h5, h6 {
+  text-wrap: pretty;
+}
+
+input[type="color"].color-input-style {
+  -webkit-appearance: none;
+  border: none;
+}
+input[type="color"].color-input-style::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+input[type="color"].color-input-style::-webkit-color-swatch {
+  border: none;
+  border-radius: 8px;
 }

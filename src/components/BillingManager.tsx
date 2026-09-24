@@ -214,7 +214,7 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
 
             <div className="bg-white p-5 rounded-2xl border border-gray-200">
               <span className="text-[10px] uppercase font-bold text-gray-400">Horas Registradas</span>
-              <p className="text-2xl font-serif font-bold text-amber-950 mt-1">
+              <p className="text-2xl font-serif font-bold text-amber-950 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 {(totalMinutesWorked / 60).toFixed(1)} hrs
               </p>
               <span className="text-[9px] text-gray-400">Tiempo total de comanda</span>
@@ -222,13 +222,13 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
 
             <div className="bg-white p-5 rounded-2xl border border-gray-200">
               <span className="text-[10px] uppercase font-bold text-gray-400">Cobrado (Paid)</span>
-              <p className="text-2xl font-serif font-bold text-emerald-600 mt-1">${totalBilledVal.toFixed(2)}</p>
+              <p className="text-2xl font-serif font-bold text-emerald-600 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">${totalBilledVal.toFixed(2)}</p>
               <span className="text-[9px] text-gray-400">Facturas finiquitadas</span>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-gray-200">
               <span className="text-[10px] uppercase font-bold text-gray-400">Pendiente (Sent)</span>
-              <p className="text-2xl font-serif font-bold text-rose-500 mt-1">${totalPendingVal.toFixed(2)}</p>
+              <p className="text-2xl font-serif font-bold text-rose-500 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">${totalPendingVal.toFixed(2)}</p>
               <span className="text-[9px] text-gray-400">Corte por cobrar</span>
             </div>
           </div>
@@ -367,11 +367,11 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
                 <div key={inv.id} className="py-3 flex items-center justify-between gap-4 text-xs">
                   <div>
                     <p className="font-bold text-amber-950">{inv.invoiceNumber}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Cliente: {inv.clientName} • Vence: {inv.dueDate}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5 truncate">Cliente: {inv.clientName} • Vence: {inv.dueDate}</p>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold text-emerald-600">${inv.total.toFixed(2)}</span>
+                  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                    <span className="font-bold text-emerald-600 whitespace-nowrap text-sm">${inv.total.toFixed(2)}</span>
                     <button
                       onClick={() => setPreviewInvoice(inv)}
                       className="p-1 border hover:bg-gray-50 text-gray-500 rounded flex items-center gap-1 text-[10px] font-bold"

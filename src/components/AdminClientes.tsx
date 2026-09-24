@@ -103,17 +103,17 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, triggerTo
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={handleExportCSV}
-            className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Download className="w-4 h-4" />
             Exportar CSV
           </button>
           <button
             onClick={() => window.print()}
-            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Printer className="w-4 h-4" />
             Imprimir Reporte PDF
@@ -155,13 +155,13 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, triggerTo
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-              <th className="p-4">Cliente</th>
-              <th className="p-4">Celular (WhatsApp)</th>
-              <th className="p-4">Dirección Habitual</th>
-              <th className="p-4 text-center">Pedidos</th>
-              <th className="p-4">Gasto Acumulado</th>
-              <th className="p-4">Nivel / Rango</th>
-              <th className="p-4 text-right">Fidelización</th>
+              <th className="p-4 whitespace-nowrap">Cliente</th>
+              <th className="p-4 whitespace-nowrap">Celular (WhatsApp)</th>
+              <th className="p-4 whitespace-nowrap">Dirección Habitual</th>
+              <th className="p-4 text-center whitespace-nowrap">Pedidos</th>
+              <th className="p-4 whitespace-nowrap">Gasto Acumulado</th>
+              <th className="p-4 whitespace-nowrap">Nivel / Rango</th>
+              <th className="p-4 text-right whitespace-nowrap">Fidelización</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-xs text-gray-700">
@@ -174,28 +174,28 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, triggerTo
             ) : (
               filteredClients.map(client => (
                 <tr key={client.phone} className="hover:bg-gray-50/50">
-                  <td className="p-4 font-bold text-amber-950 flex items-center gap-2">
+                  <td className="p-4 font-bold text-amber-950 flex items-center gap-2 whitespace-nowrap">
                     <div className="w-8 h-8 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-800 text-xs font-bold">
                       {client.name.charAt(0)}
                     </div>
                     <span>{client.name}</span>
                   </td>
-                  <td className="p-4 font-medium text-gray-600">
+                  <td className="p-4 font-medium text-gray-600 whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
                       <Phone className="w-3.5 h-3.5 text-gray-400" />
                       {client.phone}
                     </span>
                   </td>
-                  <td className="p-4 max-w-xs truncate text-gray-500 font-medium">
+                  <td className="p-4 max-w-xs truncate text-gray-500 font-medium whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
                       <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                       {client.address}
                     </span>
                   </td>
                   <td className="p-4 text-center font-bold text-gray-800">{client.orderCount}</td>
-                  <td className="p-4 font-bold text-emerald-600">${client.totalSpent.toFixed(2)} MXN</td>
-                  <td className="p-4">{getTierBadge(client.tier)}</td>
-                  <td className="p-4 text-right">
+                  <td className="p-4 font-bold text-emerald-600 whitespace-nowrap">${client.totalSpent.toFixed(2)} MXN</td>
+                  <td className="p-4 whitespace-nowrap">{getTierBadge(client.tier)}</td>
+                  <td className="p-4 text-right whitespace-nowrap">
                     <button
                       onClick={() => handleSendPromo(client)}
                       className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-colors"

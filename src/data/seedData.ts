@@ -355,5 +355,9 @@ export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
   isOpenManual: true,
   ticketFooter: '¡Gracias por desayunar con Doña Cony! Hecho con amor mexicano. ♥️',
   deliveryFee: 15.00,
-  brandLogo: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=200'
+  brandLogo: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=200',
+  businessName: 'Desayunos Cony',
+  slogan: 'El auténtico sabor de casa',
+  address: 'Calle Conocida, Ciudad, Estado',
+  themeColor: '#f59e0b'
 };

@@ -326,10 +326,10 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, coupons =
 
       {/* MODAL: Redactar y Personalizar Promoción con Cupón */}
       {selectedClientForPromo && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-gray-200 overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs animate-fade-in overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col shadow-2xl border border-gray-200 overflow-hidden my-auto">
             {/* Header */}
-            <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-900 to-amber-950 text-white flex items-center justify-between">
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-900 to-amber-950 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-white/10 rounded-xl">
                   <MessageCircle className="w-5 h-5 text-emerald-400" />
@@ -345,14 +345,14 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, coupons =
               </div>
               <button
                 onClick={() => setSelectedClientForPromo(null)}
-                className="p-1 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-1 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Body */}
-            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+            <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0 text-xs overscroll-contain">
               {/* Comensal Status Info Strip */}
               <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-amber-50/80 rounded-xl border border-amber-200">
                 <div className="flex items-center gap-2">
@@ -455,7 +455,7 @@ export const AdminClientes: React.FC<AdminClientesProps> = ({ clients, coupons =
             </div>
 
             {/* Footer Buttons */}
-            <div className="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2.5">
+            <div className="p-3.5 sm:p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-2.5 shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
               <button
                 type="button"
                 onClick={() => setSelectedClientForPromo(null)}

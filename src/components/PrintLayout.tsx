@@ -49,13 +49,15 @@ export const PrintLayout: React.FC<PrintLayoutProps> = ({ title, subtitle, confi
           {/* Header */}
           <div className="flex justify-between items-start border-b-2 border-amber-500 pb-6 mb-8">
             <div className="flex items-center gap-4">
-              {config.brandLogo ? (
-                <img src={config.brandLogo} alt="Logo" className="w-16 h-16 rounded-2xl object-cover shadow-sm print:border print:border-amber-200" />
-              ) : (
-                <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center shadow-sm print:border print:border-amber-200">
-                  <Utensils className="text-white w-8 h-8 print:text-amber-600" />
-                </div>
-              )}
+              <img 
+                src={config.brandLogo || '/cony-logo.svg'} 
+                alt="Logo" 
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = '/cony-logo.svg';
+                }}
+                className="w-16 h-16 rounded-2xl object-contain bg-amber-50 p-1 shadow-sm print:border print:border-amber-200" 
+              />
               <div>
                 <h1 className="text-3xl font-serif font-bold text-amber-950">{config.businessName || 'Desayunos Cony'}</h1>
                 <p className="text-sm text-gray-600 font-medium mt-1">{config.slogan || 'El auténtico sabor de casa'}</p>

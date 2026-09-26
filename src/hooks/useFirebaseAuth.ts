@@ -10,7 +10,7 @@ export interface UserProfile {
   phone: string;
   role: 'superadmin' | 'admin' | 'cocina' | 'mensajero' | 'esperando';
   avatar: string;
-  fontSizePreference?: 'normal' | 'large';
+  fontSizePreference?: 'normal' | 'large' | 'xlarge';
   createdAt: string;
 }
 

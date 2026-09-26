@@ -763,6 +763,9 @@ export const INITIAL_FOOD_ORDERS: FoodOrder[] = [
     tip: 10.00,
     total: 115.00,
     paymentMethod: 'efectivo',
+    needsChange: true,
+    payingWith: 200,
+    changeAmount: 85.00,
     status: 'recibido', // Red SLA since 25 min ago
     createdAt: getPastISOTime(25),
     slaLimitTime: getPastISOTime(19),
@@ -791,6 +794,9 @@ export const INITIAL_FOOD_ORDERS: FoodOrder[] = [
     tip: 10.00,
     total: 120.00,
     paymentMethod: 'efectivo',
+    needsChange: true,
+    payingWith: 500,
+    changeAmount: 380.00,
     status: 'camino', // Only visible for Deliverer (Mensajero)
     createdAt: getPastISOTime(35),
     slaLimitTime: getPastISOTime(5),
@@ -815,7 +821,7 @@ export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
   deliveryFee: 15.00,
   suggestedTip: 10.00,
   defaultOpeningStock: 25,
-  brandLogo: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=200',
+  brandLogo: '/cony-logo.svg',
   businessName: 'BM Desayunos Cony',
   slogan: 'Preparaciones al momento',
   address: 'Servicio a Domicilio y Local (WhatsApp: 55-1135-8258)',

@@ -130,6 +130,9 @@ export interface FoodOrder {
   tip: number;
   total: number;
   paymentMethod: 'efectivo' | 'transferencia';
+  needsChange?: boolean;
+  payingWith?: number; // Monto o billete con el que paga el cliente en efectivo (ej. 200, 500, 1000)
+  changeAmount?: number; // Cambio que Desayunos Cony / el repartidor debe llevar/entregar
   status: 'recibido' | 'preparando' | 'listo' | 'camino' | 'entregado' | 'cancelado';
   createdAt: string; // ISO string
   slaLimitTime: string; // ISO string
@@ -152,4 +155,13 @@ export interface BusinessConfig {
   slogan?: string;
   address?: string;
   themeColor?: string;
+}
+
+export type StaffRole = 'superadmin' | 'admin' | 'cocina' | 'mensajero' | 'repartidor' | 'esperando';
+
+export interface StaffUser {
+  id: string;
+  name: string;
+  email: string;
+  role: StaffRole;
 }

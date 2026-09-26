@@ -95,7 +95,8 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  DollarSign
+  DollarSign,
+  Type
 } from 'lucide-react';
 
 interface AuditLog {
@@ -113,34 +114,54 @@ interface StaffUser {
   role: 'superadmin' | 'admin' | 'cocina' | 'mensajero' | 'esperando';
 }
 
-// Helper function to resize images to avoid Firestore 1MB limit
+// Helper function to resize images to avoid Firestore 1MB limit while preserving PNG transparency
 const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<string> => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Error al leer el archivo desde el dispositivo.'));
     reader.onload = (event) => {
       const img = new Image();
+      img.onerror = () => reject(new Error('El archivo seleccionado no es una imagen válida o está dañado.'));
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+        try {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
 
-        if (width > height) {
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
           }
-        } else {
-          if (height > maxHeight) {
-            width = Math.round((width * maxHeight) / height);
-            height = maxHeight;
+
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
           }
+
+          // Clear canvas with full transparency support
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Preserve PNG transparency for logos, or use JPEG for standard photos
+          const isPng = file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+          const outputFormat = isPng ? 'image/png' : 'image/jpeg';
+          const quality = isPng ? undefined : 0.85;
+          const dataUrl = canvas.toDataURL(outputFormat, quality);
+          resolve(dataUrl);
+        } catch (canvasErr) {
+          console.warn('Canvas resize fallback:', canvasErr);
+          resolve(event.target?.result as string);
         }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7)); // Compress to 70% quality JPEG
       };
       img.src = event.target?.result as string;
     };
@@ -297,6 +318,65 @@ export default function App() {
       title,
       description
     });
+  };
+
+  // --- Accessibility Typography Scale State (Normal, Grande, Muy Grande) ---
+  type FontScale = 'normal' | 'large' | 'xlarge';
+  const [fontScale, setFontScale] = useState<FontScale>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('cony_font_scale');
+      if (saved === 'normal' || saved === 'large' || saved === 'xlarge') return saved;
+    }
+    return 'normal';
+  });
+
+  const handleFontScaleChange = (scale: FontScale) => {
+    setFontScale(scale);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('cony_font_scale', scale);
+    }
+    document.documentElement.classList.remove('font-size-normal', 'font-size-large', 'font-size-xlarge');
+    document.documentElement.classList.add(`font-size-${scale}`);
+    const labels = {
+      normal: 'Tamaño Normal (100%) — Visualización estándar',
+      large: 'Texto Grande (+15%) — Lectura cómoda para vista cansada',
+      xlarge: 'Texto Muy Grande (+30%) — Optimizado para adultos mayores con lentes 👓'
+    };
+    triggerToast('info', 'Tamaño de Letra Ajustado', labels[scale]);
+  };
+
+  // Dynamic synchronization of font size class across mounts and scale changes
+  useEffect(() => {
+    const currentClass = `font-size-${fontScale}`;
+    document.documentElement.classList.remove('font-size-normal', 'font-size-large', 'font-size-xlarge');
+    document.documentElement.classList.add(currentClass);
+  }, [fontScale]);
+
+  // --- Dynamic Brand Logo Management State ---
+  const [brandLogoState, setBrandLogoState] = useState<string>(businessConfig?.brandLogo || '');
+  const [isUploadingLogo, setIsUploadingLogo] = useState<boolean>(false);
+  const [logoUrlInput, setLogoUrlInput] = useState<string>('');
+
+  useEffect(() => {
+    if (businessConfig?.brandLogo) {
+      setBrandLogoState(businessConfig.brandLogo);
+    }
+  }, [businessConfig?.brandLogo]);
+
+  const handleLogoFileUpload = async (file: File) => {
+    setIsUploadingLogo(true);
+    try {
+      const base64String = await resizeImage(file, 360, 360);
+      setBrandLogoState(base64String);
+      const hiddenInput = document.getElementById('brandLogoInput') as HTMLInputElement;
+      if (hiddenInput) hiddenInput.value = base64String;
+      triggerToast('success', 'Logotipo Cargado', 'Vista previa actualizada. Guarda la configuración para aplicar el cambio en todo el sistema.');
+    } catch (err: any) {
+      console.error('Error al procesar logotipo:', err);
+      triggerToast('error', 'Error al procesar imagen', err?.message || 'Formato no soportado.');
+    } finally {
+      setIsUploadingLogo(false);
+    }
   };
 
   // Add Log Entry Helper
@@ -707,10 +787,8 @@ export default function App() {
   }, [userRole]);
 
   useEffect(() => {
-    if (activeProfile?.fontSizePreference === 'large') {
-      document.documentElement.classList.add('font-size-large');
-    } else {
-      document.documentElement.classList.remove('font-size-large');
+    if (activeProfile?.fontSizePreference) {
+      handleFontScaleChange(activeProfile.fontSizePreference);
     }
   }, [activeProfile?.fontSizePreference]);
 
@@ -955,21 +1033,78 @@ export default function App() {
             )}
 
             {/* Dynamic Brand Logo and Text Space */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
               <img 
-                src={businessConfig.brandLogo} 
+                src={businessConfig.brandLogo || '/cony-logo.svg'} 
                 alt="Logo Desayunador" 
-                className="h-10 w-10 rounded-xl object-cover border border-amber-200/60 shadow-xs shrink-0" 
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = '/cony-logo.svg';
+                }}
+                className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl object-contain bg-amber-50/80 p-0.5 border border-amber-200/80 shadow-xs shrink-0" 
               />
-              <div className="flex flex-col">
-                <span className="font-serif font-extrabold text-base sm:text-lg text-amber-950 tracking-tight leading-tight">{businessConfig.businessName || 'Desayunos Cony'}</span>
-                <span className="text-[9px] sm:text-[10px] text-amber-600 font-bold leading-none">{businessConfig.slogan || 'El auténtico sabor de casa'}</span>
+              <div className="flex flex-col min-w-0">
+                <span className="font-serif font-extrabold text-base sm:text-lg text-amber-950 tracking-tight leading-tight truncate">
+                  {businessConfig.businessName || 'BM Desayunos Cony'}
+                </span>
+                <span className="text-[9px] sm:text-[10px] text-amber-700 font-bold leading-none truncate">
+                  {businessConfig.slogan || 'El auténtico sabor de casa'}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Right Side: Role details or Login trigger */}
-          <div className="flex items-center gap-3">
+          {/* Right Side: Font Size Accessibility Controller + Role details / Actions */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Universal Typography Accessibility Controller for Seniors / Glasses */}
+            <div 
+              className="flex items-center bg-amber-50/90 border border-amber-200/90 rounded-xl p-0.5 shadow-2xs shrink-0"
+              title="Ajustar tamaño de letra para lectura cómoda con lentes"
+            >
+              <span className="hidden md:inline-flex items-center gap-1 px-2 text-[10px] sm:text-[11px] font-bold text-amber-900 border-r border-amber-200/80 mr-0.5">
+                <Type className="w-3.5 h-3.5 text-amber-700" />
+                <span>Letra</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleFontScaleChange('normal')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  fontScale === 'normal'
+                    ? 'bg-white text-amber-950 shadow-xs border border-amber-200'
+                    : 'text-amber-800 hover:text-amber-950 hover:bg-amber-100/60'
+                }`}
+                title="Tamaño Normal (100%)"
+              >
+                <span>A</span>
+                <span className="hidden xl:inline text-[10px] font-normal text-gray-500">Normal</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleFontScaleChange('large')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  fontScale === 'large'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-amber-800 hover:text-amber-950 hover:bg-amber-100/60'
+                }`}
+                title="Tamaño Grande (+15%) — Vista Cómoda"
+              >
+                <span className="font-extrabold">A+</span>
+                <span className="hidden xl:inline text-[10px] font-normal opacity-90">Grande</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleFontScaleChange('xlarge')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  fontScale === 'xlarge'
+                    ? 'bg-amber-700 text-white shadow-xs ring-1 ring-amber-400'
+                    : 'text-amber-800 hover:text-amber-950 hover:bg-amber-100/60'
+                }`}
+                title="Tamaño Muy Grande (+30%) — Optimizado para Adultos Mayores con Lentes 👓"
+              >
+                <span className="font-black">A++</span>
+                <span className="hidden xl:inline text-[10px] font-normal opacity-90">Lentes 👓</span>
+              </button>
+            </div>
             {userRole !== 'publico' ? (
               <div className="flex items-center gap-2">
                 {/* Quick Button: View Public Menu / Assist Customer without logging out */}
@@ -1305,6 +1440,8 @@ export default function App() {
                 foodItems={foodItems}
                 config={businessConfig}
                 coupons={coupons}
+                fontScale={fontScale}
+                onFontScaleChange={handleFontScaleChange}
                 onPlaceOrder={handlePlaceOrder}
                 triggerToast={triggerToast}
               />
@@ -1570,6 +1707,8 @@ export default function App() {
                         foodItems={foodItems}
                         config={businessConfig}
                         coupons={coupons}
+                        fontScale={fontScale}
+                        onFontScaleChange={handleFontScaleChange}
                         onPlaceOrder={handlePlaceOrder}
                         triggerToast={triggerToast}
                       />
@@ -2010,10 +2149,47 @@ export default function App() {
                         </div>
 
                         <div className="md:col-span-2 space-y-4">
-                          <label className="block text-xs font-semibold text-gray-600">Logotipo del Desayunador (Marca) *</label>
+                          <label className="block text-xs font-semibold text-gray-700">Logotipo del Desayunador (Marca Oficial) *</label>
                           
-                          <div className="p-4 bg-amber-50/40 border border-amber-100 rounded-xl space-y-3">
-                            <span className="block text-xs font-bold text-amber-950">📸 Cargar Imagen (Móvil / PC)</span>
+                          {/* Live Logo Preview and Restore Button */}
+                          <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-2xl flex flex-col sm:flex-row items-center gap-5">
+                            <div className="w-24 h-24 rounded-2xl bg-white border-2 border-amber-300 shadow-md p-1.5 flex items-center justify-center shrink-0 overflow-hidden">
+                              <img
+                                src={brandLogoState || businessConfig.brandLogo || '/cony-logo.svg'}
+                                alt="Vista previa del logo"
+                                onError={(e) => {
+                                  e.currentTarget.onerror = null;
+                                  e.currentTarget.src = '/cony-logo.svg';
+                                }}
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                            <div className="space-y-2 text-center sm:text-left flex-1">
+                              <h4 className="text-xs font-bold text-amber-950">Vista Previa del Logotipo</h4>
+                              <p className="text-[11px] text-gray-600 leading-relaxed">
+                                Este logotipo se muestra en la cabecera, carta digital de clientes y tickets de impresión térmica.
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setBrandLogoState('/cony-logo.svg');
+                                    const input = document.getElementById('brandLogoInput') as HTMLInputElement;
+                                    if (input) input.value = '/cony-logo.svg';
+                                    triggerToast('success', 'Logotipo Oficial Restaurado', 'Se ha restablecido el logo oficial de BM Desayunos Cony. Guarda la configuración.');
+                                  }}
+                                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                                  title="Restaurar el logo vectorial oficial de BM Desayunos Cony"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5" />
+                                  <span>Restaurar Logo Oficial BM Cony</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-4 bg-white border border-gray-200 rounded-xl space-y-3">
+                            <span className="block text-xs font-bold text-gray-800">📸 Cargar Nueva Imagen (Móvil / PC)</span>
                             <input
                               type="file"
                               accept="image/*"
@@ -2023,6 +2199,7 @@ export default function App() {
                                 if (file) {
                                   try {
                                     const base64String = await resizeImage(file, 400, 400);
+                                    setBrandLogoState(base64String);
                                     const input = document.getElementById('brandLogoInput') as HTMLInputElement;
                                     if (input) input.value = base64String;
                                     triggerToast('success', 'Logo Procesado', 'El logo se ha cargado. No olvides pulsar Guardar Configuración.');
@@ -2033,6 +2210,21 @@ export default function App() {
                               }}
                               className={`block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer ${userRole !== 'superadmin' ? 'opacity-50 cursor-not-allowed' : ''}`}
                             />
+                            <div className="pt-2 border-t border-gray-100">
+                              <label className="block text-[11px] font-semibold text-gray-600 mb-1">O escribir / pegar enlace web (URL):</label>
+                              <input
+                                type="text"
+                                placeholder="https://... o /cony-logo.svg"
+                                value={brandLogoState}
+                                onChange={(e) => {
+                                  setBrandLogoState(e.target.value);
+                                  const input = document.getElementById('brandLogoInput') as HTMLInputElement;
+                                  if (input) input.value = e.target.value;
+                                }}
+                                disabled={userRole !== 'superadmin'}
+                                className="w-full p-2 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                              />
+                            </div>
                           </div>
 
                           <div>
@@ -2040,12 +2232,12 @@ export default function App() {
                               type="hidden"
                               id="brandLogoInput"
                               name="brandLogo"
-                              defaultValue={businessConfig.brandLogo}
+                              value={brandLogoState || businessConfig.brandLogo || '/cony-logo.svg'}
                             />
                             {userRole !== 'superadmin' ? (
                               <p className="text-[9.5px] text-rose-600 mt-1 font-bold">⚠️ El logotipo del desayunador solo puede ser modificado por el Superadministrador.</p>
                             ) : (
-                              <p className="text-[9.5px] text-gray-400 mt-1">Los cambios se reflejarán en toda la aplicación al guardar.</p>
+                              <p className="text-[9.5px] text-gray-400 mt-1">Los cambios se reflejarán en toda la aplicación al pulsar Guardar Configuración.</p>
                             )}
                           </div>
                         </div>
@@ -2627,17 +2819,22 @@ export default function App() {
                           
                           {/* FONT SIZE PREFERENCE */}
                           <div className="sm:col-span-2">
-                            <label className="block text-xs font-bold text-gray-600 mb-1">Tamaño de Letra (a — A)</label>
+                            <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1.5">
+                              <span>Tamaño de Letra para Lectura (Accesibilidad)</span>
+                              <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">👓 Confort Visual</span>
+                            </label>
                             <select
                               name="fontSizePreference"
-                              defaultValue={activeProfile.fontSizePreference || 'normal'}
+                              value={fontScale}
+                              onChange={(e) => handleFontScaleChange(e.target.value as FontScale)}
                               className="w-full p-2.5 border border-gray-200 rounded-xl text-xs focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
                             >
-                              <option value="normal">Normal (Predeterminado)</option>
-                              <option value="large">Grande (Facilita la lectura)</option>
+                              <option value="normal">Normal (100% — Predeterminado)</option>
+                              <option value="large">Grande (+15% — Lectura Cómoda)</option>
+                              <option value="xlarge">Muy Grande (+30% — Óptimo para Adultos Mayores con Lentes 👓)</option>
                             </select>
-                            <p className="text-[10px] text-gray-500 mt-1">
-                              Guarda los cambios para aplicar el nuevo tamaño de letra a toda la aplicación.
+                            <p className="text-[10.5px] text-gray-500 mt-1">
+                              El cambio se previsualiza al instante y se guarda en tu perfil para todas las áreas.
                             </p>
                           </div>
                           
@@ -2722,10 +2919,10 @@ export default function App() {
 
       {/* EDIT DISH MODAL DIALOG (GLOBAL FOR KITCHEN & MENU CONFIG) */}
       {editingDish && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4 overflow-hidden">
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
           <form
             onSubmit={handleSaveEditDishSubmit}
-            className="bg-white rounded-2xl max-w-xl w-full border border-gray-200 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-fade-in"
+            className="bg-white rounded-2xl max-w-xl w-full border border-gray-200 shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] overflow-hidden animate-fade-in my-auto"
           >
             {/* STICKY HEADER */}
             <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-gray-150 bg-white shrink-0">
@@ -3214,7 +3411,7 @@ export default function App() {
             </div>
 
             {/* STICKY FOOTER */}
-            <div className="px-5 sm:px-6 py-3.5 border-t border-gray-150 bg-gray-50 flex items-center justify-between gap-3 shrink-0 rounded-b-2xl">
+            <div className="px-4 sm:px-6 py-3.5 border-t border-gray-150 bg-gray-50 flex items-center justify-between gap-3 shrink-0 rounded-b-2xl sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
               <div className="text-xs text-gray-600">
                 <span>Precio a guardar: </span>
                 <strong className="text-amber-700 font-black text-sm">${Number(dishForm.price || 0).toFixed(2)} MXN</strong>

@@ -401,18 +401,18 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
 
       {/* Entry Dialog Modal */}
       {showEntryModal && (
-        <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4 backdrop-blur-xs">
-          <form onSubmit={handleSaveEntry} className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up">
-            <div className="p-4 bg-amber-50 border-b flex justify-between items-center">
+        <div className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <form onSubmit={handleSaveEntry} className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col my-auto">
+            <div className="p-4 bg-amber-50 border-b flex justify-between items-center shrink-0">
               <h4 className="font-serif font-bold text-sm text-amber-950">
                 {editingEntry ? 'Editar Registro de Tiempo' : 'Registrar Tiempo Trabajado'}
               </h4>
-              <button type="button" onClick={() => setShowEntryModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button type="button" onClick={() => setShowEntryModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain">
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Cliente *</label>
                 <select
@@ -462,17 +462,17 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+            <div className="p-3.5 sm:p-4 bg-gray-50 border-t flex justify-end gap-3 shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
               <button
                 type="button"
                 onClick={() => setShowEntryModal(false)}
-                className="px-3.5 py-1.5 border rounded-lg text-xs text-gray-500"
+                className="px-4 py-2 border border-gray-300 hover:bg-gray-100 rounded-xl text-xs text-gray-600 cursor-pointer font-medium"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold"
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md"
               >
                 Guardar Horas
               </button>
@@ -483,16 +483,16 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
 
       {/* Invoice Print Simulator Modal */}
       {previewInvoice && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up">
-            <div className="p-4 bg-gray-50 border-b flex justify-between items-center">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col my-auto">
+            <div className="p-4 bg-gray-50 border-b flex justify-between items-center shrink-0">
               <h4 className="font-bold text-xs uppercase text-gray-500">Visualizar Factura</h4>
-              <button onClick={() => setPreviewInvoice(null)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setPreviewInvoice(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-8 space-y-6">
+            <div className="p-5 sm:p-6 space-y-5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
               <div className="flex justify-between items-start border-b pb-4">
                 <div>
                   <h3 className="font-bold text-lg text-gray-800">FACTURA</h3>
@@ -535,13 +535,16 @@ export const BillingManager: React.FC<BillingManagerProps> = ({
                   <span>${previewInvoice.total.toFixed(2)}</span>
                 </div>
               </div>
+            </div>
 
+            <div className="p-3.5 sm:p-4 bg-gray-50 border-t shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
               <button
+                type="button"
                 onClick={() => {
                   window.print();
                   triggerToast('success', 'Impresión de factura', 'Se ha disparado el diálogo nativo.');
                 }}
-                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5"
+                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
               >
                 <Printer className="w-4 h-4" />
                 Imprimir Documento

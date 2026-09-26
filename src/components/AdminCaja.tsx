@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Plus, Minus, CreditCard, Receipt, FileText, ChevronRight, DollarSign, X, Printer, CheckCircle } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, CreditCard, Receipt, FileText, ChevronRight, DollarSign, X, Printer, CheckCircle, Coins, Utensils } from 'lucide-react';
 import { FoodOrder, FoodItem, Expense, BusinessConfig } from '../types';
 
 interface AdminCajaProps {
@@ -41,6 +41,8 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
   const [posCustomer, setPosCustomer] = useState<string>('Comensal Mostrador');
   const [posPhone, setPosPhone] = useState<string>('5500000000');
   const [posPayment, setPosPayment] = useState<'efectivo' | 'transferencia'>('efectivo');
+  const [posNeedsChange, setPosNeedsChange] = useState<boolean>(false);
+  const [posPayingWith, setPosPayingWith] = useState<string>('');
   const [posTip, setPosTip] = useState<number>(config?.suggestedTip !== undefined ? Number(config.suggestedTip) : 10);
 
   useEffect(() => {
@@ -163,6 +165,8 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
     const sub = calculatePosSubtotal();
     const tot = sub + posTip;
+    const payingWithNum = parseFloat(posPayingWith) || 0;
+    const changeAmt = posNeedsChange && payingWithNum > tot ? payingWithNum - tot : undefined;
 
     const walkInOrder: FoodOrder = {
       id: `ord-pos-${Date.now()}`,
@@ -171,7 +175,9 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
       clientPhone: posPhone,
       deliveryType: 'local',
       address: 'Mostrador / En Local',
-      notes: 'Orden de mostrador cobrada en caja',
+      notes: posNeedsChange && payingWithNum > 0
+        ? `Orden mostrador (Paga con: $${payingWithNum.toFixed(2)} MXN • Cambio: $${(changeAmt || 0).toFixed(2)} MXN)`
+        : 'Orden mostrador en caja (Pago exacto)',
       items: posCart.map(c => ({
         itemId: c.item.id,
         name: c.item.name,
@@ -185,6 +191,9 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
       tip: posTip,
       total: tot,
       paymentMethod: posPayment,
+      needsChange: posPayment === 'efectivo' ? posNeedsChange : undefined,
+      payingWith: posPayment === 'efectivo' && posNeedsChange && payingWithNum > 0 ? payingWithNum : undefined,
+      changeAmount: posPayment === 'efectivo' && posNeedsChange && changeAmt !== undefined ? changeAmt : undefined,
       status: 'recibido', // Start at kitchen queue instead of auto-completing
       createdAt: new Date().toISOString(),
       slaLimitTime: new Date().toISOString()
@@ -195,6 +204,8 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
     setPosCustomer('Comensal Mostrador');
     setPosPhone('5500000000');
     setPosTip(10);
+    setPosNeedsChange(false);
+    setPosPayingWith('');
     triggerToast('success', 'Venta manual cobrada', 'Se sumó con éxito al arqueo de caja.');
   };
 
@@ -391,9 +402,9 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                     <button
                       type="button"
                       onClick={() => setPosPayment('efectivo')}
-                      className={`py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      className={`py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         posPayment === 'efectivo'
-                          ? 'border-amber-500 bg-amber-50 text-amber-900'
+                          ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold'
                           : 'border-gray-200 text-gray-500'
                       }`}
                     >
@@ -401,16 +412,124 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPosPayment('transferencia')}
-                      className={`py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                      onClick={() => {
+                        setPosPayment('transferencia');
+                        setPosNeedsChange(false);
+                        setPosPayingWith('');
+                      }}
+                      className={`py-2 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         posPayment === 'transferencia'
-                          ? 'border-amber-500 bg-amber-50 text-amber-900'
+                          ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold'
                           : 'border-gray-200 text-gray-500'
                       }`}
                     >
                       🏦 Transferencia
                     </button>
                   </div>
+
+                  {/* Apartado Cambio en Efectivo (Billetes de alta denominación) */}
+                  {posPayment === 'efectivo' && (
+                    <div className="p-3 bg-amber-50/80 rounded-xl border border-amber-200/90 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-amber-950 flex items-center gap-1">
+                          <Coins className="w-3.5 h-3.5 text-amber-600" />
+                          <span>¿El comensal requiere cambio?</span>
+                        </span>
+                        <span className="text-[9.5px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
+                          Caja / Mostrador
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPosNeedsChange(false);
+                            setPosPayingWith('');
+                          }}
+                          className={`py-1.5 px-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                            !posNeedsChange
+                              ? 'bg-amber-600 text-white border-amber-600 shadow-2xs font-bold'
+                              : 'bg-white text-gray-600 border-gray-200'
+                          }`}
+                        >
+                          👌 Pago Exacto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPosNeedsChange(true);
+                            if (!posPayingWith) {
+                              const curTot = calculatePosSubtotal() + posTip;
+                              const defaultBill = curTot <= 200 ? '200' : curTot <= 500 ? '500' : '1000';
+                              setPosPayingWith(defaultBill);
+                            }
+                          }}
+                          className={`py-1.5 px-2 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                            posNeedsChange
+                              ? 'bg-amber-600 text-white border-amber-600 shadow-2xs font-bold'
+                              : 'bg-white text-gray-600 border-gray-200'
+                          }`}
+                        >
+                          🪙 Requiere Cambio
+                        </button>
+                      </div>
+
+                      {posNeedsChange && (
+                        <div className="space-y-1.5 pt-1.5 border-t border-amber-200/60">
+                          <p className="text-[10.5px] text-gray-600 font-medium">
+                            Paga con billete de:
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {[100, 200, 500, 1000].map(b => (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setPosPayingWith(String(b))}
+                                className={`px-2 py-0.5 text-[11px] font-bold rounded border transition-all cursor-pointer ${
+                                  posPayingWith === String(b)
+                                    ? 'bg-amber-800 text-white border-amber-900 shadow-xs'
+                                    : 'bg-white text-amber-950 border-amber-200 hover:bg-amber-100/60'
+                                }`}
+                              >
+                                ${b}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="relative mt-1">
+                            <span className="absolute left-2.5 top-1.5 text-xs text-gray-500 font-bold">$</span>
+                            <input
+                              type="number"
+                              placeholder="Otro billete o monto (ej. 500)"
+                              value={posPayingWith}
+                              onChange={e => setPosPayingWith(e.target.value)}
+                              className="w-full pl-6 pr-2 py-1 bg-white border border-amber-300 rounded text-xs font-bold text-amber-950 focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                            />
+                          </div>
+
+                          {parseFloat(posPayingWith) > 0 && (() => {
+                            const curTot = calculatePosSubtotal() + posTip;
+                            const diff = parseFloat(posPayingWith) - curTot;
+                            return diff >= 0 ? (
+                              <div className="p-2 bg-emerald-50 border border-emerald-300 rounded-lg flex items-center justify-between">
+                                <span className="text-[10.5px] text-emerald-800 font-bold">
+                                  🪙 Cambio a entregar al cliente:
+                                </span>
+                                <span className="text-sm font-extrabold text-emerald-900">
+                                  ${diff.toFixed(2)} MXN
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="p-1.5 bg-rose-50 border border-rose-200 rounded text-[10.5px] text-rose-700 font-semibold">
+                                ⚠️ El billete (${parseFloat(posPayingWith).toFixed(2)}) es menor a la cuenta (${curTot.toFixed(2)}).
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Total POS Breakdowns */}
                   <div className="p-3.5 bg-gray-50 rounded-xl text-xs space-y-1">
@@ -442,19 +561,58 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
           {/* MODAL CONFIG MODIFIERS FOR POS */}
           {selectedFood && (
-            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 backdrop-blur-xs">
-              <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up">
-                <div className="p-4 bg-amber-50 border-b flex justify-between items-center">
-                  <div>
-                    <h4 className="font-serif font-bold text-sm text-amber-950">Complementos de Mesa</h4>
-                    <p className="text-[10px] text-gray-400">{selectedFood.name}</p>
-                  </div>
-                  <button onClick={() => setSelectedFood(null)} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+              <div className="bg-white rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col my-auto">
+                <div className="relative p-4 sm:p-5 bg-gradient-to-br from-amber-50 via-orange-50/40 to-amber-100/70 border-b border-amber-200/90 shadow-2xs shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFood(null)}
+                    className="absolute top-3 right-3 p-1.5 rounded-full bg-white/90 hover:bg-white text-amber-900 border border-amber-200/80 shadow-2xs transition-all hover:scale-105 z-10 cursor-pointer"
+                    title="Cerrar"
+                  >
+                    <X className="w-4 h-4 text-amber-900" />
                   </button>
+
+                  <div className="flex items-center justify-between gap-3 pr-7">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-900 bg-amber-200/80 border border-amber-300 px-2 py-0.5 rounded-md inline-block">
+                          Personalizar Comanda
+                        </span>
+                        {selectedFood.category && (
+                          <span className="text-[10.5px] font-bold text-amber-800">
+                            • {selectedFood.category}
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="font-serif font-extrabold text-lg text-amber-950 leading-tight">
+                        {selectedFood.name}
+                      </h4>
+                      <p className="text-sm font-extrabold text-amber-700 mt-0.5">
+                        ${selectedFood.price.toFixed(2)} <span className="text-[10px] font-semibold text-amber-900/70">MXN</span>
+                      </p>
+                    </div>
+
+                    {/* Foto 1:1 del platillo */}
+                    <div className="w-16 h-16 aspect-square rounded-xl overflow-hidden shrink-0 shadow-md border-2 border-white ring-2 ring-amber-300/80 bg-amber-100 flex items-center justify-center relative">
+                      {selectedFood.image && selectedFood.image.trim() !== '' ? (
+                        <img
+                          src={selectedFood.image}
+                          alt={selectedFood.name}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-700 bg-gradient-to-br from-amber-100 to-amber-200 p-1">
+                          <Utensils className="w-6 h-6 text-amber-700" />
+                          <span className="text-[8px] font-bold text-amber-900">Cony</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="p-6 space-y-5 max-h-[50vh] overflow-y-auto">
+                <div className="p-4 sm:p-6 space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                   {selectedFood.options?.map(option => (
                     <div key={option.title} className="space-y-2">
                       <h5 className="font-bold text-xs text-amber-950">{option.title}</h5>
@@ -464,9 +622,10 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                           return (
                             <button
                               key={choice}
+                              type="button"
                               onClick={() => handleToggleOption(option.title, choice, option.multiselect)}
-                              className={`p-2 border rounded-lg text-xs text-left font-medium transition-all ${
-                                isSel ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold' : 'border-gray-200 text-gray-500'
+                              className={`p-2 border rounded-lg text-xs text-left font-medium transition-all cursor-pointer ${
+                                isSel ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
                               }`}
                             >
                               {choice}
@@ -491,17 +650,18 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                           return (
                             <button
                               key={ex.name}
+                              type="button"
                               onClick={() => handleToggleExtra(ex)}
-                              className={`p-2 border rounded-lg text-xs text-left transition-all flex items-center justify-between ${
-                                isSel ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold' : 'border-gray-200 text-gray-500'
+                              className={`p-2 border rounded-lg text-xs text-left transition-all flex items-center justify-between cursor-pointer ${
+                                isSel ? 'border-amber-500 bg-amber-50 text-amber-900 font-bold shadow-2xs' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
                               }`}
                             >
-                              <div>
-                                <p className="font-medium">{ex.name}</p>
-                                <p className="text-[9px] text-amber-600">+${ex.price} MXN</p>
+                              <div className="min-w-0 pr-1">
+                                <p className="font-medium truncate">{ex.name}</p>
+                                <p className="text-[9px] text-amber-600 font-bold">+${ex.price} MXN</p>
                               </div>
                               {isSel && (
-                                <span className="text-amber-600 font-bold text-xs">✓</span>
+                                <span className="text-amber-600 font-bold text-xs shrink-0">✓</span>
                               )}
                             </button>
                           );
@@ -511,11 +671,19 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                   )}
                 </div>
 
-                <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
-                  <button onClick={() => setSelectedFood(null)} className="px-3.5 py-1.5 border rounded-lg text-xs text-gray-500">
+                <div className="p-3.5 sm:p-4 bg-gray-50 border-t flex justify-end gap-3 shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFood(null)}
+                    className="px-4 py-2 border border-gray-300 hover:bg-gray-100 rounded-xl text-xs text-gray-600 cursor-pointer font-medium"
+                  >
                     Cerrar
                   </button>
-                  <button onClick={addPosModifiersToCart} className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={addPosModifiersToCart}
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-bold shadow-md cursor-pointer"
+                  >
                     Agregar a Comanda
                   </button>
                 </div>
@@ -576,11 +744,23 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                 {orders.map(order => (
                   <div key={order.id} className={`py-3 flex items-center justify-between gap-2 sm:gap-3 text-xs ${order.status === 'cancelado' ? 'opacity-50' : ''}`}>
                     <div className="min-w-0 flex-1 pr-2">
-                      <p className={`font-bold leading-tight ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
-                        {order.orderNumber} ({order.clientName})
-                        {order.status === 'cancelado' && <span className="ml-2 text-[9px] bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded no-underline inline-block">Cancelado</span>}
+                      <p className={`font-bold leading-tight text-xs sm:text-sm ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                        {order.orderNumber} • {order.clientName}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{order.createdAt.split('T')[0]} • {order.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transf'}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                          order.status === 'cancelado'
+                            ? 'bg-rose-100 text-rose-800'
+                            : order.status === 'entregado'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {order.status}
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          {order.createdAt.split('T')[0]} • {order.paymentMethod === 'efectivo' ? '💵 Efectivo' : '🏦 Transf'}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                       <span className={`font-bold whitespace-nowrap text-sm ${order.status === 'cancelado' ? 'text-gray-400 line-through' : 'text-amber-950'}`}>${order.total.toFixed(2)}</span>
@@ -633,16 +813,16 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
           {/* New Expense Modal */}
           {showExpenseModal && (
-            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 backdrop-blur-xs">
-              <form onSubmit={handleCreateExpense} className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up">
-                <div className="p-4 bg-rose-50 border-b border-rose-100 flex justify-between items-center">
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+              <form onSubmit={handleCreateExpense} className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-gray-100 animate-scale-up max-h-[calc(100dvh-1.5rem)] flex flex-col my-auto">
+                <div className="p-4 bg-rose-50 border-b border-rose-100 flex justify-between items-center shrink-0">
                   <h4 className="font-serif font-bold text-sm text-rose-950">Registrar Salida de Efectivo</h4>
-                  <button type="button" onClick={() => setShowExpenseModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <button type="button" onClick={() => setShowExpenseModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="p-5 space-y-4">
+                <div className="p-5 space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Concepto del Gasto *</label>
                     <input
@@ -668,17 +848,17 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                   </div>
                 </div>
 
-                <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+                <div className="p-3.5 sm:p-4 bg-gray-50 border-t flex justify-end gap-3 shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
                   <button
                     type="button"
                     onClick={() => setShowExpenseModal(false)}
-                    className="px-3.5 py-1.5 border rounded-lg text-xs text-gray-500"
+                    className="px-4 py-2 border border-gray-300 hover:bg-gray-100 rounded-xl text-xs text-gray-600 cursor-pointer font-medium"
                   >
                     Cerrar
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold"
+                    className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md"
                   >
                     Registrar Egreso
                   </button>
@@ -689,21 +869,22 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
           {/* THERMAL TICKET MODAL */}
           {showThermalTicket && (
-            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-xs">
-              <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-gray-200 animate-scale-up">
-                <div className="p-4 bg-gray-100 border-b flex justify-between items-center">
+            <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
+              <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl border border-gray-200 animate-scale-up max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] flex flex-col my-auto">
+                <div className="p-4 bg-gray-100 border-b flex justify-between items-center shrink-0">
                   <div>
                     <h4 className="font-bold text-xs uppercase text-gray-600 tracking-wider">Simulador Ticket Térmico</h4>
                     <p className="text-[10px] text-gray-400">Optimizado para rollo térmico de 80mm monocromático</p>
                   </div>
-                  <button onClick={() => setShowThermalTicket(null)} className="text-gray-400 hover:text-gray-600">
+                  <button onClick={() => setShowThermalTicket(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <div className="p-4 bg-gray-50 border-b flex items-center justify-between">
+                <div className="p-3 sm:p-4 bg-gray-50 border-b flex items-center justify-between shrink-0">
                   <span className="text-xs text-gray-600 font-medium">Habilitar impresión de Ticket</span>
                   <button
+                    type="button"
                     onClick={() => setEnableThermalToggle(!enableThermalToggle)}
                     className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                       enableThermalToggle ? 'bg-amber-500' : 'bg-gray-200'
@@ -716,7 +897,7 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
                 </div>
 
                 {enableThermalToggle ? (
-                  <div className="p-6 bg-white flex flex-col items-center">
+                  <div className="p-4 sm:p-6 bg-white flex flex-col items-center flex-1 min-h-0 overflow-y-auto overscroll-contain">
                     {/* Thermal Paper View */}
                     <div className="w-full max-w-xs border-2 border-dashed border-gray-400 p-5 bg-gray-50/50 rounded-md font-mono text-[11px] text-gray-800 space-y-4">
                       <div className="text-center space-y-1 border-b border-dashed border-gray-300 pb-3">
@@ -782,6 +963,12 @@ export const AdminCaja: React.FC<AdminCajaProps> = ({
 
                       <div className="text-center text-[9px] border-t border-dashed border-gray-300 pt-3 space-y-1">
                         <p className="font-bold uppercase">Pago: {showThermalTicket.paymentMethod}</p>
+                        {showThermalTicket.paymentMethod === 'efectivo' && showThermalTicket.needsChange && showThermalTicket.payingWith && (
+                          <div className="font-bold text-gray-800">
+                            <p>PAGA CON: ${showThermalTicket.payingWith.toFixed(2)} MXN</p>
+                            <p>CAMBIO ENTREGADO: ${(showThermalTicket.changeAmount || 0).toFixed(2)} MXN</p>
+                          </div>
+                        )}
                         <p className="italic text-gray-500">{config.ticketFooter}</p>
                       </div>
                     </div>

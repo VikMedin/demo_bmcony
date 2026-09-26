@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { ShoppingBag, Plus, Minus, X, Check, Clock, AlertTriangle, MessageSquare, ExternalLink, CheckCircle, Coffee, MapPin, Heart, Tag, Sparkles } from 'lucide-react';
+import { ShoppingBag, Plus, Minus, X, Check, Clock, AlertTriangle, MessageSquare, ExternalLink, CheckCircle, Coffee, MapPin, Heart, Tag, Sparkles, Coins, Utensils, ChevronRight } from 'lucide-react';
 import { FoodItem, FoodOrder, BusinessConfig, Coupon } from '../types';
 
 const DEFAULT_BEVERAGE_IMAGE = 'https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&q=80&w=800';
@@ -14,6 +14,8 @@ interface ClientMenuProps {
   foodItems: FoodItem[];
   config: BusinessConfig;
   coupons?: Coupon[];
+  fontScale?: 'normal' | 'large' | 'xlarge';
+  onFontScaleChange?: (scale: 'normal' | 'large' | 'xlarge') => void;
   onPlaceOrder: (order: FoodOrder) => void;
   triggerToast: (type: 'success' | 'error' | 'info', title: string, description?: string) => void;
 }
@@ -22,6 +24,8 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
   foodItems,
   config,
   coupons = [],
+  fontScale = 'normal',
+  onFontScaleChange,
   onPlaceOrder,
   triggerToast
 }) => {
@@ -62,6 +66,8 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
   const [notes, setNotes] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'transferencia'>('efectivo');
+  const [needsChange, setNeedsChange] = useState<boolean>(false);
+  const [payingWith, setPayingWith] = useState<string>('');
 
   // Customer Tip Selection State (Not added automatically, toggleable & editable)
   const [includeTip, setIncludeTip] = useState<boolean>(false);
@@ -443,6 +449,18 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
       : 0;
     const tot = subAfterDiscount + fee + effectiveTip;
 
+    if (paymentMethod === 'efectivo' && needsChange) {
+      const payingNum = parseFloat(payingWith);
+      if (!payingWith || isNaN(payingNum) || payingNum <= 0) {
+        triggerToast('error', 'Monto de Billete Requerido', 'Por favor ingresa o selecciona el billete con el que pagarás para preparar tu cambio.');
+        return;
+      }
+      if (payingNum < tot) {
+        triggerToast('error', 'Monto Insuficiente', `El billete ingresado ($${payingNum.toFixed(2)} MXN) no cubre el total de la orden ($${tot.toFixed(2)} MXN).`);
+        return;
+      }
+    }
+
     const newOrder: FoodOrder = {
       id: `ord-${Date.now()}`,
       orderNumber: `DC-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -467,6 +485,9 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
       tip: effectiveTip,
       total: tot,
       paymentMethod,
+      needsChange: paymentMethod === 'efectivo' ? needsChange : undefined,
+      payingWith: paymentMethod === 'efectivo' && needsChange && parseFloat(payingWith) > 0 ? parseFloat(payingWith) : undefined,
+      changeAmount: paymentMethod === 'efectivo' && needsChange && parseFloat(payingWith) > tot ? parseFloat(payingWith) - tot : undefined,
       status: 'recibido',
       createdAt: new Date().toISOString(),
       slaLimitTime: new Date(Date.now() + 20 * 60 * 1000).toISOString() // 20 min limit
@@ -529,7 +550,16 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
       text += `💖 *Propina:* $0.00 MXN\n`;
     }
     text += `💰 *TOTAL A PAGAR:* $${tot.toFixed(2)} MXN\n`;
-    text += `💳 *Método:* ${paymentMethod === 'efectivo' ? '💵 Efectivo contra entrega' : '🏦 Transferencia Bancaria'}\n\n`;
+    if (paymentMethod === 'efectivo') {
+      if (needsChange && parseFloat(payingWith) > 0) {
+        const changeVal = parseFloat(payingWith) > tot ? parseFloat(payingWith) - tot : 0;
+        text += `💳 *Método:* 💵 Efectivo (Paga con billete de: $${parseFloat(payingWith).toFixed(2)} MXN | Cambio necesario: $${changeVal.toFixed(2)} MXN)\n\n`;
+      } else {
+        text += `💳 *Método:* 💵 Efectivo contra entrega (Pago exacto - No requiere cambio)\n\n`;
+      }
+    } else {
+      text += `💳 *Método:* 🏦 Transferencia Bancaria\n\n`;
+    }
     text += `_¡Muchísimas gracias por tu compra! Tu comanda ha entrado en la cocina de Doña Cony._ 🍳✨`;
 
     const encodedText = encodeURIComponent(text);
@@ -541,25 +571,47 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
     setAppliedCoupon(null);
     setCouponInput('');
     setCouponFeedback(null);
+    setNeedsChange(false);
+    setPayingWith('');
     triggerToast('success', '¡Comanda Registrada en Cocina!', `Folio #${newOrder.orderNumber} listo para confirmación.`);
   };
 
   const totalCartCount = cart.reduce((acc, c) => acc + c.quantity, 0);
   const sub = calculateSubtotal();
+  const effectiveTip = includeTip
+    ? (parseFloat(customTip) >= 0 && !isNaN(parseFloat(customTip)) ? parseFloat(customTip) : 0)
+    : 0;
+  const discountAmount = appliedCoupon ? (sub * appliedCoupon.discountPercentage) / 100 : 0;
+  const subAfterDiscount = Math.max(0, sub - discountAmount);
+  const deliveryCost = deliveryType === 'domicilio' ? (Number(config?.deliveryFee) || 0) : 0;
+  const currentTotal = subAfterDiscount + deliveryCost + effectiveTip;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6" id="comensal-view">
       {/* Header Banner */}
-      <div className="relative overflow-hidden bg-amber-50 border border-amber-200 rounded-2xl p-6 md:p-8 mb-8 flex flex-col md:flex-row items-center gap-6">
+      <div className="relative overflow-hidden bg-amber-50 border border-amber-200 rounded-2xl p-6 md:p-8 mb-6 flex flex-col md:flex-row items-center gap-6">
+        {/* Brand Logo Display */}
+        <div className="h-20 w-20 md:h-24 md:w-24 rounded-2xl overflow-hidden border-2 border-amber-300 shadow-md bg-white shrink-0 flex items-center justify-center p-1.5">
+          <img
+            src={config.brandLogo || '/cony-logo.svg'}
+            alt={config.businessName || 'BM Desayunos Cony'}
+            className="h-full w-full object-contain"
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = '/cony-logo.svg';
+            }}
+          />
+        </div>
         <div className="flex-1 text-center md:text-left">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 mb-3">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             Cocina Mexicana Tradicional
           </div>
           <h1 className="text-3xl md:text-4xl font-serif text-amber-950 font-bold tracking-tight">
-            Desayunos Cony
+            {config.businessName || 'BM Desayunos Cony'}
           </h1>
           <p className="mt-2 text-gray-700 max-w-xl text-sm md:text-base leading-relaxed">
+            {config.slogan ? <strong className="text-amber-900 font-semibold">{config.slogan}. </strong> : ''}
             Ordena tus desayunos favoritos al comal y recíbelos al instante. Pedidos automáticos por WhatsApp, directo, rápido y sin intermediarios.
           </p>
         </div>
@@ -582,6 +634,69 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
           )}
         </div>
       </div>
+
+      {/* Visual Accessibility Bar for Elderly Customers / Glasses */}
+      {onFontScaleChange && (
+        <div className="mb-8 bg-gradient-to-r from-amber-50 to-orange-50/70 border border-amber-200/90 rounded-2xl p-3.5 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
+              👓
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-amber-950 flex items-center gap-2">
+                <span>Modo de Lectura & Tamaño de Letra</span>
+                <span className="text-[10px] font-semibold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200/60">
+                  Ideal con Lentes
+                </span>
+              </p>
+              <p className="text-[11px] sm:text-xs text-gray-600">
+                Aumenta el tamaño tipográfico para leer el menú con máxima comodidad.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-amber-200 shadow-2xs self-start sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => onFontScaleChange('normal')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                fontScale === 'normal'
+                  ? 'bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs'
+                  : 'text-gray-600 hover:text-amber-900 hover:bg-amber-50'
+              }`}
+              title="Tamaño normal 100%"
+            >
+              <span className="text-xs font-semibold">A</span>
+              <span>Normal</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onFontScaleChange('large')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                fontScale === 'large'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-gray-600 hover:text-amber-900 hover:bg-amber-50'
+              }`}
+              title="Aumentar tamaño de letra 15%"
+            >
+              <span className="text-sm font-extrabold">A+</span>
+              <span>Grande (+15%)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onFontScaleChange('xlarge')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                fontScale === 'xlarge'
+                  ? 'bg-amber-700 text-white shadow-xs ring-2 ring-amber-400'
+                  : 'text-gray-600 hover:text-amber-900 hover:bg-amber-50'
+              }`}
+              title="Aumentar tamaño de letra 30% para lectura con lentes"
+            >
+              <span className="text-base font-black">A++</span>
+              <span>Muy Grande (+30%) 👓</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Closed Validador Alert */}
       {!isCurrentlyOpen && (
@@ -717,25 +832,25 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
       {/* Modifiers Modal */}
       {selectedFood && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
           <div
-            className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col animate-scale-up"
+            className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col animate-scale-up max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] my-auto"
             style={{ maxWidth: '520px' }}
           >
             {isAdded ? (
-              <div className="p-8 text-center flex flex-col items-center">
-                <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mb-4 animate-bounce-short">
-                  <Check className="w-8 h-8 stroke-[3]" />
+              <div className="p-5 sm:p-7 text-center flex flex-col items-center overflow-y-auto max-h-[calc(100dvh-2rem)]">
+                <div className="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 mb-3 animate-bounce-short shrink-0">
+                  <Check className="w-7 h-7 stroke-[3]" />
                 </div>
                 
-                <h3 className="font-serif font-bold text-2xl text-amber-950 mb-2">
+                <h3 className="font-serif font-bold text-xl sm:text-2xl text-amber-950 mb-1.5">
                   ¡Agregado al Carrito!
                 </h3>
-                <p className="text-sm text-gray-600 max-w-sm mb-8">
+                <p className="text-xs sm:text-sm text-gray-600 max-w-sm mb-6">
                   Hemos sumado <strong className="text-amber-950">{selectedFood.name}</strong> a tu pedido con todas tus especificaciones de preparación.
                 </p>
 
-                <div className="flex items-center gap-4 w-full">
+                <div className="flex items-center gap-3 sm:gap-4 w-full shrink-0 sticky bottom-0 pt-2 bg-white mt-auto">
                   {/* Button 1: Pasar a Pago / Volver al Pedido */}
                   <button
                     onClick={() => {
@@ -743,7 +858,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                       setSelectedFood(null);
                       setIsAdded(false);
                     }}
-                    className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-transform active:scale-[0.98] shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    className="flex-1 py-3.5 sm:py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs sm:text-sm transition-transform active:scale-[0.98] shadow-md flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <ShoppingBag className="w-4 h-4" />
                     {showCheckout ? 'Volver al Pedido y Pagar' : 'Pasar a Pago'}
@@ -755,12 +870,12 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                       setSelectedFood(null);
                       setIsAdded(false);
                     }}
-                    className="w-14 h-14 shrink-0 flex items-center justify-center relative rounded-xl border-2 border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-950 transition-transform active:scale-[0.98] shadow-xs cursor-pointer"
+                    className="w-12 h-12 sm:w-14 sm:h-14 shrink-0 flex items-center justify-center relative rounded-xl border-2 border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-950 transition-transform active:scale-[0.98] shadow-xs cursor-pointer"
                     title="Seguir Comprando"
                   >
-                    <Plus className="w-6 h-6 text-amber-800" />
+                    <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-amber-800" />
                     {totalCartCount > 0 && (
-                      <span className="absolute -top-2 -right-2 bg-rose-600 text-white text-[10px] font-extrabold w-5 h-5 flex items-center justify-center rounded-full shadow-md animate-pulse">
+                      <span className="absolute -top-1.5 -right-1.5 bg-rose-600 text-white text-[10px] font-extrabold w-5 h-5 flex items-center justify-center rounded-full shadow-md animate-pulse">
                         {totalCartCount}
                       </span>
                     )}
@@ -769,25 +884,79 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
               </div>
             ) : (
               <>
-                <div className="p-5 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-serif font-bold text-lg text-amber-950">Ajustar Platillo</h3>
-                    <p className="text-xs text-gray-500">{selectedFood.name}</p>
-                  </div>
+                {/* Encabezado vistoso: Nombre del platillo en tipografía alta + Foto 1:1 a la derecha */}
+                <div className="relative p-4 sm:p-5 bg-gradient-to-br from-amber-50 via-orange-50/40 to-amber-100/70 border-b border-amber-200/90 shadow-2xs shrink-0">
+                  {/* Botón cerrar modal */}
                   <button
+                    type="button"
                     onClick={() => setSelectedFood(null)}
-                    className="p-1 rounded-full hover:bg-amber-100 transition-colors"
+                    className="absolute top-3 right-3 p-1.5 rounded-full bg-white/90 hover:bg-white text-amber-900 border border-amber-200/80 shadow-2xs transition-all hover:scale-105 z-10 cursor-pointer"
+                    title="Cerrar ventana"
                   >
-                    <X className="w-5 h-5 text-amber-900" />
+                    <X className="w-4 h-4 sm:w-5 sm:h-5 text-amber-900" />
                   </button>
+
+                  <div className="flex items-center justify-between gap-3 sm:gap-4 pr-7 sm:pr-8">
+                    {/* Información y nombre en tipografía alta */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-amber-900 bg-amber-200/80 border border-amber-300 px-2 py-0.5 rounded-md inline-block">
+                          Ajustar Platillo
+                        </span>
+                        {selectedFood.category && (
+                          <span className="text-[10.5px] sm:text-[11px] font-bold text-amber-800">
+                            • {selectedFood.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Nombre del platillo: Tipografía crecida y llamativa */}
+                      <h3 className="font-serif font-extrabold text-lg sm:text-2xl text-amber-950 leading-tight">
+                        {selectedFood.name}
+                      </h3>
+
+                      {/* Precio base */}
+                      <div className="mt-0.5 sm:mt-1 flex items-baseline gap-1.5">
+                        <span className="text-base sm:text-lg font-extrabold text-amber-700">
+                          ${selectedFood.price.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] sm:text-[11px] font-bold text-amber-900/70">
+                          MXN
+                        </span>
+                      </div>
+
+                      {selectedFood.description && (
+                        <p className="text-[11px] sm:text-xs text-gray-600 mt-0.5 sm:mt-1 line-clamp-2 leading-snug">
+                          {selectedFood.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Foto del platillo: Formato 1:1 vistoso para el comensal */}
+                    <div className="w-16 h-16 sm:w-22 sm:h-22 aspect-square rounded-2xl overflow-hidden shrink-0 shadow-md border-2 border-white ring-2 ring-amber-300/80 bg-amber-100 flex items-center justify-center relative group">
+                      {selectedFood.image && selectedFood.image.trim() !== '' ? (
+                        <img
+                          src={selectedFood.image}
+                          alt={selectedFood.name}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-amber-700 bg-gradient-to-br from-amber-100 to-amber-200 p-1.5">
+                          <Utensils className="w-6 h-6 sm:w-8 sm:h-8 text-amber-700" />
+                          <span className="text-[8.5px] sm:text-[9px] font-bold text-amber-900 mt-0.5">Cony</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="p-6 overflow-y-auto max-h-[60vh] space-y-6">
+                <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0 space-y-5 overscroll-contain">
                   {/* Options */}
                   {selectedFood.options?.map(option => (
-                    <div key={option.title} className="space-y-2.5">
+                    <div key={option.title} className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-sm text-amber-950">{option.title}</h4>
+                        <h4 className="font-bold text-xs sm:text-sm text-amber-950">{option.title}</h4>
                         <span className="text-[10px] text-gray-400 font-medium">
                           {option.multiselect ? 'Múltiple' : 'Selecciona una'}
                         </span>
@@ -802,13 +971,13 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                               onClick={() =>
                                 handleToggleOption(option.title, choice, option.multiselect)
                               }
-                              className={`p-2.5 rounded-xl border text-xs text-left font-medium transition-all flex items-center justify-between ${
+                              className={`p-2.5 rounded-xl border text-xs text-left font-medium transition-all flex items-center justify-between cursor-pointer ${
                                 isSelected
                                   ? 'border-amber-500 bg-amber-50 text-amber-900 font-semibold'
                                   : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                               }`}
                             >
-                              {choice}
+                              <span className="truncate pr-1">{choice}</span>
                               {isSelected && <Check className="w-3.5 h-3.5 text-amber-600 shrink-0" />}
                             </button>
                           );
@@ -819,9 +988,9 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
                   {/* Extras */}
                   {selectedFood.extras && selectedFood.extras.length > 0 && (
-                    <div className="space-y-2.5">
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-bold text-sm text-amber-950">¿Gustas algún ingrediente extra?</h4>
+                        <h4 className="font-bold text-xs sm:text-sm text-amber-950">¿Gustas algún ingrediente extra?</h4>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                           selectedFood.extrasMultiselect !== false
                             ? 'bg-blue-50 text-blue-800 border-blue-200'
@@ -839,15 +1008,15 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                               key={extra.name}
                               type="button"
                               onClick={() => handleToggleExtra(extra)}
-                              className={`p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
+                              className={`p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between cursor-pointer ${
                                 isSelected
                                   ? 'border-amber-500 bg-amber-50 text-amber-900 font-semibold shadow-xs'
                                   : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                               }`}
                             >
-                              <div>
-                                <p className="font-medium">{extra.name}</p>
-                                <p className="text-[10px] text-amber-600">+${extra.price.toFixed(2)} MXN</p>
+                              <div className="min-w-0 pr-1">
+                                <p className="font-medium truncate">{extra.name}</p>
+                                <p className="text-[10px] text-amber-600 font-bold">+${extra.price.toFixed(2)} MXN</p>
                               </div>
                               {isSelected ? (
                                 isMultiselect ? (
@@ -870,7 +1039,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                   )}
 
                   {/* Selector de Porciones */}
-                  <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-3.5 space-y-1.5">
+                  <div className="bg-amber-50/70 border border-amber-200/90 rounded-2xl p-3 sm:p-3.5 space-y-1.5">
                     <label className="block text-xs font-bold text-amber-950">
                       Porciones a Seleccionar *
                     </label>
@@ -893,26 +1062,28 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                   </div>
                 </div>
 
-                <div className="p-5 border-t border-gray-100 bg-gray-50 flex items-center justify-between gap-4">
+                {/* STICKY FOOTER: BOTÓN DE CONTINUAR / AGREGAR AL PEDIDO NUNCA SE PIERDE */}
+                <div className="p-3.5 sm:p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between gap-3 sm:gap-4 shrink-0 sticky bottom-0 z-10 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
                   <div>
                     <p className="text-[10px] text-gray-400 font-medium">
                       Precio final ({modalQuantity} {modalQuantity === 1 ? 'porción' : 'porciones'})
                     </p>
-                    <p className="font-bold text-amber-600 text-lg">
+                    <p className="font-extrabold text-amber-700 text-base sm:text-lg">
                       $
                       {(
                         (selectedFood.price +
                           modalExtras.reduce((sum, e) => sum + e.price, 0)) *
                         modalQuantity
                       ).toFixed(2)}{' '}
-                      MXN
+                      <span className="text-[10px] font-bold text-amber-900/70">MXN</span>
                     </p>
                   </div>
                   <button
                     onClick={addModifiersToCart}
-                    className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                    className="px-4 sm:px-6 py-2.5 sm:py-3 bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer shadow-md inline-flex items-center gap-1.5"
                   >
-                    Agregar {modalQuantity > 1 ? `(${modalQuantity} porciones)` : ''} al Pedido
+                    <span>Agregar {modalQuantity > 1 ? `(${modalQuantity})` : ''} al Pedido</span>
+                    <Plus className="w-4 h-4 stroke-[2.5]" />
                   </button>
                 </div>
               </>
@@ -921,15 +1092,15 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
         </div>
       )}
 
-      {/* Cross-Selling Modal (Proportion 4:3, responsive on mobile) */}
+      {/* Cross-Selling Modal (Proportion 4:3, responsive on all devices) */}
       {showCrossSell && crossSellItem && (
-        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-2 sm:p-4 backdrop-blur-xs overflow-y-auto">
           <div
-            className="relative bg-white rounded-3xl overflow-hidden shadow-2xl border border-amber-200/80 w-full flex flex-col transition-all"
+            className="relative bg-white rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl border border-amber-200/80 w-full flex flex-col transition-all max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] my-auto"
             style={{ maxWidth: '460px' }}
           >
-            {/* Top 4:3 Ratio Image Showcase */}
-            <div className="relative w-full aspect-[4/3] max-h-56 sm:max-h-64 bg-amber-50 overflow-hidden group">
+            {/* Top Showcase */}
+            <div className="relative w-full aspect-[16/9] sm:aspect-[4/3] max-h-36 sm:max-h-52 bg-amber-50 overflow-hidden group shrink-0">
               <img
                 src={crossSellItem.image || DEFAULT_BEVERAGE_IMAGE}
                 alt={crossSellItem.name}
@@ -979,29 +1150,29 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
             </div>
 
             {/* Modal Body & Action Buttons */}
-            <div className="p-4 sm:p-5 flex flex-col justify-between gap-3 sm:gap-4 text-center">
+            <div className="p-3.5 sm:p-5 flex flex-col justify-between gap-3 text-center flex-1 min-h-0 overflow-y-auto overscroll-contain">
               <div>
                 <p className="text-xs text-gray-600 leading-relaxed max-w-sm mx-auto">
                   {crossSellItem.description || `Disfruta un delicioso ${crossSellItem.name} calientito con receta casera tradicional de Doña Cony.`}
                 </p>
               </div>
 
-              {/* Touch-Friendly Responsive Buttons */}
-              <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {/* Touch-Friendly Responsive Buttons: STICKY AT BOTTOM */}
+              <div className="grid grid-cols-2 gap-2.5 pt-1 shrink-0 sticky bottom-0 bg-white">
                 <button
                   type="button"
                   onClick={() => {
                     setShowCrossSell(false);
                     setCrossSellItem(null);
                   }}
-                  className="py-3 px-3 border border-gray-200 text-gray-600 hover:text-gray-900 rounded-xl text-xs font-bold hover:bg-gray-100/80 active:scale-[0.98] transition-all cursor-pointer min-h-[46px]"
+                  className="py-2.5 sm:py-3 px-3 border border-gray-200 text-gray-600 hover:text-gray-900 rounded-xl text-xs font-bold hover:bg-gray-100/80 active:scale-[0.98] transition-all cursor-pointer min-h-[42px]"
                 >
                   No, gracias
                 </button>
                 <button
                   type="button"
                   onClick={handleAddCrossSell}
-                  className="py-3 px-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5 min-h-[46px]"
+                  className="py-2.5 sm:py-3 px-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg active:scale-[0.98] transition-all cursor-pointer flex items-center justify-center gap-1.5 min-h-[42px]"
                 >
                   <span>¡Sí, se antoja!</span>
                   <span className="text-sm">☕</span>
@@ -1016,10 +1187,10 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
       {showCheckout && (
         <div className="fixed inset-0 z-50 bg-black/55 flex justify-end backdrop-blur-xs">
           <div
-            className="bg-white w-full max-w-lg h-full flex flex-col shadow-2xl overflow-hidden animate-slide-left"
+            className="bg-white w-full max-w-lg h-full max-h-[100dvh] flex flex-col shadow-2xl overflow-hidden animate-slide-left"
             style={{ maxWidth: '520px' }}
           >
-            <div className="p-5 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+            <div className="p-4 sm:p-5 bg-amber-50 border-b border-amber-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-amber-800" />
                 <h3 className="font-serif font-bold text-lg text-amber-950">
@@ -1031,7 +1202,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                   if (submittedOrder) setSubmittedOrder(null);
                   setShowCheckout(false);
                 }}
-                className="p-1 rounded-full hover:bg-amber-100 text-amber-900"
+                className="p-1 rounded-full hover:bg-amber-100 text-amber-900 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1039,7 +1210,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
 
             {submittedOrder ? (
               /* PANTALLA DE CONFIRMACIÓN Y ENVÍO DE COMANDA */
-              <div className="flex-1 overflow-y-auto p-6 space-y-5 flex flex-col items-center text-center">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5 flex flex-col items-center text-center overscroll-contain">
                 <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-inner mt-2">
                   <CheckCircle className="w-9 h-9" />
                 </div>
@@ -1089,6 +1260,23 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                   <p className="text-gray-700">
                     <strong>Tipo:</strong> {submittedOrder.order.deliveryType === 'domicilio' ? 'Entrega a Domicilio 🛵' : 'Retiro en Local 🏪'}
                   </p>
+                  <p className="text-gray-700">
+                    <strong>Método de Pago:</strong> {submittedOrder.order.paymentMethod === 'efectivo' ? '💵 Efectivo contra entrega' : '🏦 Transferencia Bancaria'}
+                  </p>
+                  {submittedOrder.order.paymentMethod === 'efectivo' && (
+                    <div className="p-2.5 bg-amber-100/70 border border-amber-300 rounded-lg text-[11px] text-amber-950 font-medium">
+                      {submittedOrder.order.needsChange && submittedOrder.order.payingWith ? (
+                        <div>
+                          <p><strong>Pagas con billete de:</strong> ${submittedOrder.order.payingWith.toFixed(2)} MXN</p>
+                          <p className="font-extrabold text-emerald-800 text-xs mt-0.5">
+                            🪙 Cambio exacto preparado: ${(submittedOrder.order.changeAmount || 0).toFixed(2)} MXN
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-emerald-800 font-semibold">✅ Pago exacto acordado (no requieres cambio)</p>
+                      )}
+                    </div>
+                  )}
                   {submittedOrder.order.address && (
                     <p className="text-gray-700"><strong>Dirección:</strong> {submittedOrder.order.address}</p>
                   )}
@@ -1138,7 +1326,7 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-6 overscroll-contain">
                 {/* Cart List */}
                 <div className="space-y-3">
                   <h4 className="font-bold text-xs text-gray-400 uppercase tracking-wider">Productos Seleccionados</h4>
@@ -1479,7 +1667,11 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setPaymentMethod('transferencia')}
+                          onClick={() => {
+                            setPaymentMethod('transferencia');
+                            setNeedsChange(false);
+                            setPayingWith('');
+                          }}
                           className={`p-2 rounded-lg border text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
                             paymentMethod === 'transferencia'
                               ? 'border-amber-500 bg-amber-50/50 text-amber-900'
@@ -1490,6 +1682,121 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {/* Apartado de Cambio en Efectivo (Billetes de alta denominación) */}
+                    {paymentMethod === 'efectivo' && (
+                      <div className="p-3.5 bg-amber-50/80 rounded-xl border border-amber-200/90 space-y-2.5 animate-fadeIn">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                            <Coins className="w-4 h-4 text-amber-600" />
+                            <span>¿Requieres cambio en efectivo?</span>
+                          </div>
+                          <span className="text-[10px] text-amber-800 bg-amber-100 font-bold px-2 py-0.5 rounded-full border border-amber-200">
+                            Billetes de alta denominación
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-gray-600 leading-snug">
+                          Indícanos si pagarás con billete alto ($100, $200, $500, $1,000 MXN) para que Desayunos Cony te envíe el cambio exacto sin contratiempos.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNeedsChange(false);
+                              setPayingWith('');
+                            }}
+                            className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                              !needsChange
+                                ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span>👌 Pago exacto</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNeedsChange(true);
+                              if (!payingWith) {
+                                const nextBill = currentTotal <= 200 ? '200' : currentTotal <= 500 ? '500' : '1000';
+                                setPayingWith(nextBill);
+                              }
+                            }}
+                            className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                              needsChange
+                                ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <span>🪙 Requiero cambio</span>
+                          </button>
+                        </div>
+
+                        {needsChange && (
+                          <div className="space-y-2 pt-2 border-t border-amber-200/70">
+                            <label className="block text-[11px] font-bold text-amber-950">
+                              ¿Con qué billete o monto pagarás?
+                            </label>
+
+                            {/* Billetes rápidos */}
+                            <div className="flex flex-wrap gap-1.5">
+                              {[100, 200, 500, 1000].map(bill => (
+                                <button
+                                  key={bill}
+                                  type="button"
+                                  onClick={() => setPayingWith(String(bill))}
+                                  className={`px-3 py-1 text-xs font-extrabold rounded-lg border transition-all cursor-pointer ${
+                                    payingWith === String(bill)
+                                      ? 'bg-amber-800 text-white border-amber-950 shadow-xs'
+                                      : 'bg-white text-amber-950 border-amber-300 hover:bg-amber-100/60'
+                                  }`}
+                                >
+                                  Billete ${bill} MXN
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Input para ingresar otro monto */}
+                            <div className="relative mt-1">
+                              <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">$</span>
+                              <input
+                                type="number"
+                                min={Math.ceil(currentTotal)}
+                                step="10"
+                                placeholder="Ingresar otro monto o billete (ej. 500)"
+                                value={payingWith}
+                                onChange={e => setPayingWith(e.target.value)}
+                                className="w-full pl-7 pr-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-amber-950 focus:ring-1 focus:ring-amber-500 focus:outline-hidden"
+                              />
+                            </div>
+
+                            {/* Desglose del cambio a recibir */}
+                            {parseFloat(payingWith) > 0 && (
+                              parseFloat(payingWith) >= currentTotal ? (
+                                <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs">
+                                  <div>
+                                    <span className="text-[10px] uppercase font-bold text-emerald-800 block">
+                                      Cambio a entregarte:
+                                    </span>
+                                    <span className="text-sm font-extrabold text-emerald-900">
+                                      ${(parseFloat(payingWith) - currentTotal).toFixed(2)} MXN
+                                    </span>
+                                  </div>
+                                  <span className="text-xl">💰</span>
+                                </div>
+                              ) : (
+                                <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-[11px] text-rose-700 font-semibold">
+                                  ⚠️ El monto (${parseFloat(payingWith).toFixed(2)} MXN) es menor al total a pagar (${currentTotal.toFixed(2)} MXN).
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Cupón de Descuento Promocional */}
                     <div className="p-3.5 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2.5">
@@ -1687,6 +1994,33 @@ export const ClientMenu: React.FC<ClientMenuProps> = ({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Floating Bottom Bar: Botón flotante para continuar a la comanda que nunca se pierde */}
+      {totalCartCount > 0 && !showCheckout && !selectedFood && (
+        <div className="fixed bottom-4 inset-x-0 z-40 px-3 sm:px-4 flex justify-center pointer-events-none animate-slide-up">
+          <button
+            type="button"
+            onClick={() => setShowCheckout(true)}
+            className="pointer-events-auto max-w-md w-full py-3.5 px-5 bg-gradient-to-r from-emerald-600 via-emerald-700 to-amber-700 hover:from-emerald-700 hover:to-amber-800 text-white rounded-2xl shadow-xl flex items-center justify-between gap-3 active:scale-[0.98] transition-all cursor-pointer border border-white/25 backdrop-blur-md"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-full bg-white/25 flex items-center justify-center font-black text-xs shadow-inner">
+                {totalCartCount}
+              </span>
+              <div className="text-left leading-tight">
+                <p className="text-xs sm:text-sm font-bold">Ver Tu Comanda y Continuar</p>
+                <p className="text-[10px] text-emerald-100">Toca aquí para pasar a pagar</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 font-black text-xs sm:text-sm">
+              <span>
+                ${cart.reduce((sum, c) => sum + (c.item.price + c.selectedExtras.reduce((s, e) => s + e.price, 0)) * c.quantity, 0).toFixed(2)} MXN
+              </span>
+              <ChevronRight className="w-4 h-4 stroke-[3]" />
+            </div>
+          </button>
         </div>
       )}
     </div>

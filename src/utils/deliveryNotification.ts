@@ -108,8 +108,14 @@ export function showDeliveryNativeNotification(order: FoodOrder): Notification |
 
   try {
     const title = `🛵 ¡Nuevo Pedido por Entregar! #${order.orderNumber}`;
+    const paymentSummary = order.paymentMethod === 'efectivo'
+      ? (order.needsChange && order.payingWith
+          ? `Efectivo - Llevar cambio de $${(order.changeAmount || 0).toFixed(2)} MXN (Paga con $${order.payingWith.toFixed(2)})`
+          : 'Efectivo exacto')
+      : 'Transferencia prepagada';
+
     const options: NotificationOptions = {
-      body: `Cliente: ${order.clientName}\nDirección: ${order.address || 'Domicilio'}\nTotal a cobrar: $${order.total.toFixed(2)} MXN (${order.paymentMethod === 'efectivo' ? 'Efectivo' : 'Transferencia'})`,
+      body: `Cliente: ${order.clientName}\nDirección: ${order.address || 'Domicilio'}\nTotal a cobrar: $${order.total.toFixed(2)} MXN (${paymentSummary})`,
       icon: '/favicon.ico',
       badge: '/favicon.ico',
       tag: `delivery-${order.id}`,
@@ -161,7 +167,17 @@ export function buildMessengerWhatsAppUrl(
   }
 
   text += `💵 *Total a Cobrar:* $${order.total.toFixed(2)} MXN\n`;
-  text += `💳 *Método de Pago:* ${order.paymentMethod === 'efectivo' ? '💵 EFECTIVO (Llevar cambio)' : '🏦 TRANSFERENCIA PREVIA'}\n\n`;
+  if (order.paymentMethod === 'efectivo') {
+    if (order.needsChange && order.payingWith) {
+      text += `💳 *Método de Pago:* 💵 EFECTIVO\n`;
+      text += `💵 *Cliente Paga con Billete de:* $${order.payingWith.toFixed(2)} MXN\n`;
+      text += `🪙 *LLEVAR CAMBIO DE:* $${(order.changeAmount || 0).toFixed(2)} MXN\n\n`;
+    } else {
+      text += `💳 *Método de Pago:* 💵 EFECTIVO (Pago exacto - No requiere cambio)\n\n`;
+    }
+  } else {
+    text += `💳 *Método de Pago:* 🏦 TRANSFERENCIA PREVIA (Prepagado)\n\n`;
+  }
   
   text += `📦 *Detalle del Pedido:*\n`;
   order.items.forEach(it => {

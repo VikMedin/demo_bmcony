@@ -34,6 +34,9 @@
         "deliveryFee": { "type": "number" },
         "total": { "type": "number" },
         "paymentMethod": { "type": "string", "enum": ["efectivo", "transferencia"] },
+        "needsChange": { "type": "boolean" },
+        "payingWith": { "type": "number" },
+        "changeAmount": { "type": "number" },
         "status": { "type": "string", "enum": ["pendiente", "preparando", "listo", "entregado", "cancelado"] },
         "createdAt": { "type": "string" }
       },

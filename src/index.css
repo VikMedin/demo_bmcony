@@ -22,12 +22,81 @@ html {
   -ms-word-break: break-all;
   word-break: break-word;
   hyphens: auto;
+  transition: font-size 0.15s ease-in-out;
 }
 
-/* Tamaño de letra "Grande" responsive */
+/* Modos de accesibilidad visual y tamaño tipográfico para adultos mayores / uso de lentes */
+html.font-size-normal {
+  font-size: 100%;
+}
+
 html.font-size-large {
-  /* Usa clamp para escalar fluido: mínimo 105%, ideal basado en pantalla, máximo 125% */
-  font-size: clamp(105%, 2vw + 60%, 125%);
+  /* +15% de escala, ideal para vista cansada sin distorsionar botones o tarjetas */
+  font-size: 115%;
+}
+
+html.font-size-xlarge {
+  /* +30% de escala, máxima legibilidad y confort para adultos mayores con uso de lentes */
+  font-size: 130%;
+}
+
+/* Ajustes de flujo y salvaguarda de layouts al agrandar tipografía */
+html.font-size-large,
+html.font-size-xlarge {
+  line-height: 1.5;
+}
+
+/* Evitar que microtextos (8px a 11px) queden ilegibles para adultos mayores */
+html.font-size-large .text-\[8px\],
+html.font-size-large .text-\[8\.5px\],
+html.font-size-large .text-\[9px\],
+html.font-size-large .text-\[9\.5px\],
+html.font-size-large .text-\[10px\],
+html.font-size-large .text-\[11px\] {
+  font-size: 0.78rem !important;
+  line-height: 1.35 !important;
+  font-weight: 600;
+}
+
+html.font-size-xlarge .text-\[8px\],
+html.font-size-xlarge .text-\[8\.5px\],
+html.font-size-xlarge .text-\[9px\],
+html.font-size-xlarge .text-\[9\.5px\],
+html.font-size-xlarge .text-\[10px\],
+html.font-size-xlarge .text-\[11px\] {
+  font-size: 0.88rem !important;
+  line-height: 1.4 !important;
+  font-weight: 700;
+}
+
+/* Asegurar que botones no colapsen o corten textos al agrandar */
+html.font-size-large button,
+html.font-size-xlarge button {
+  min-height: max-content;
+  white-space: normal;
+}
+
+/* Proteger tarjetas y badges para que no desborden ni se recorten */
+html.font-size-large .badge,
+html.font-size-xlarge .badge,
+html.font-size-large [class*="rounded-full"],
+html.font-size-xlarge [class*="rounded-full"] {
+  min-width: max-content;
+}
+
+/* Mantener legibilidad limpia en inputs y formularios para vista cansada */
+html.font-size-large input,
+html.font-size-large select,
+html.font-size-large textarea {
+  font-size: 1rem;
+  min-height: 2.75rem;
+}
+
+html.font-size-xlarge input,
+html.font-size-xlarge select,
+html.font-size-xlarge textarea {
+  font-size: 1.1rem;
+  min-height: 3rem;
 }
 
 /* Tablas con scroll horizontal en móviles para no deformar la app */
